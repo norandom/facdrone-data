@@ -53,4 +53,4 @@ run. A family whose extra is not installed prints `unavailable family=<writer> e
 configured key value from a string. A logging filter applies it to every log record, its
 arguments and its exception text, and the command line applies the parameter pattern to the error text it
 prints. A provider URL that carries a key therefore reaches no log line, error message or
-stored evidence row.
+stored point-in-time row.

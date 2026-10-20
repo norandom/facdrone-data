@@ -29,7 +29,7 @@ column, to rows whose forward window has closed by the as-of date. It raises on 
 
 **Revisions.** The panels merge with `UpsertPanel`: a re-fetched key replaces the stored
 values, and `_updated_at` records the write. A panel therefore holds the latest revision,
-not the history of revisions. The evidence ledger is append-only and first-write-wins: a
+not the history of revisions. The point-in-time filter is append-only and first-write-wins: a
 second write to an existing key is counted as a conflict and the stored row stays.
 Changing an evidence value means writing a new `factor_version`.
 

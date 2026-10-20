@@ -71,7 +71,7 @@ Build the `FamilyPort` in a `*_families()` function next to the normaliser:
 ## 6. Register it
 
 Add the factory to the tuple in `download_families()` (`families/registry.py`). A duplicate
-`v1_writer` name or a natural key that differs from the primary key raises when the registry is
+`writer` name or a natural key that differs from the primary key raises when the registry is
 built. Selecting by provider name (`--source`) and by `--exclude-family` then covers the new
 family.
 

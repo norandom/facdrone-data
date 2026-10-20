@@ -34,8 +34,10 @@ dataset names it serves and `fetch(FetchRequest)` returns a raw `DataFrame` for 
 symbol and an inclusive date range. A new source gets a `Provider` member in
 `facdrone_data_types/symbols.py`. Construct the client in
 `facdrone_data/providers/live_clients.py`. A paid or optional source builds only when its key
-is present, and its HTTP dependency goes into an extra in `pyproject.toml`. Share the timeout
-and timezone defaults in `providers/policy.py` instead of copying them.
+is present, and its HTTP dependency goes into an extra in `pyproject.toml`. Add the provider's row to `POLICY` in `providers/policy.py` (timeout, retries by outcome,
+publication delay) and read it in the adapter instead of a literal of its own; the module
+refuses to import while a `Provider` member has no row, and `docs/providers.md` gains the
+row's two policy cells.
 
 A key is read through `ProviderCredentials.require(provider)`, which fails before any request
 when the key is missing. Add the key name to `KEY_VARIABLES` only for a new keyed provider.

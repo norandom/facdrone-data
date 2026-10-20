@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+# A synthetic futures contract table: figures for the tests, not quotations.
+- symbol: ES
+  exchange: CME
+  parent_series: ES=F
+  multiplier: 50.0
+  tick_size: 0.25
+  tick_value: 12.5
+  micro_of: null
+  limit_weight: 1.0
+  session_open: '18:00'
+  session_close: '17:00'
+  commission_per_side: 1.0
+  fees_per_side: 2.0
+  initial_margin: 0.0
+  sizing_contract: false
+  currency: USD
+  verify:
+  - fees_per_side
+  - initial_margin
+- symbol: MES
+  exchange: CME
+  parent_series: ES=F
+  multiplier: 5.0
+  tick_size: 0.25
+  tick_value: 1.25
+  micro_of: ES
+  limit_weight: 0.1
+  session_open: '18:00'
+  session_close: '17:00'
+  commission_per_side: 0.25
+  fees_per_side: 0.6
+  initial_margin: 0.0
+  sizing_contract: true
+  currency: USD
+  verify:
+  - fees_per_side
+  - initial_margin
+- symbol: CL
+  exchange: NYMEX
+  parent_series: CL=F
+  multiplier: 1000.0
+  tick_size: 0.01
+  tick_value: 10.0
+  micro_of: null
+  limit_weight: 1.0
+  session_open: '18:00'
+  session_close: '17:00'
+  commission_per_side: 1.0
+  fees_per_side: 2.0
+  initial_margin: 0.0
+  sizing_contract: true
+  currency: USD
+  verify:
+  - fees_per_side
+  - initial_margin
+- symbol: GC
+  exchange: COMEX
+  parent_series: GC=F
+  multiplier: 100.0
+  tick_size: 0.1
+  tick_value: 10.0
+  micro_of: null
+  limit_weight: 1.0
+  session_open: '18:00'
+  session_close: '17:00'
+  commission_per_side: 1.0
+  fees_per_side: 2.0
+  initial_margin: 0.0
+  sizing_contract: true
+  currency: USD
+  verify:
+  - fees_per_side
+  - initial_margin

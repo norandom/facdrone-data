@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+#
+# Credentials never enter the repository (facdrone-data-manager 4.4). The module reads keys from
+# the environment or from one credentials file given by path (FACDRONE_DATA_CREDENTIALS_FILE);
+# these are the places such a file or an environment file lands by habit.
+.env
+.env.*
+!.env.example
+*.env
+conf/local/
+credentials.yml
+credentials.yaml
+credentials.json
+credentials.toml
+*.credentials.yml
+*.credentials.yaml
+facdrone-data.credentials*
+secrets/
+*.pem
+*.key
+.pgpass
+
+# Python and tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+.grimp_cache/
+.coverage
+htmlcov/

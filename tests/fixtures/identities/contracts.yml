@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+# Generic futures series identities; the shared rows serve both kinds.
+- canonical: ES=F
+  kind: futures
+  asset_class: indices
+  settlement_ccy: USD
+  providers:
+    fmp: ESUSD
+    yfinance: ES=F
+  intraday: fmp
+- canonical: GC=F
+  kinds:
+  - cfd
+  - futures
+  shared_series: true
+  asset_class: commodities
+  settlement_ccy: USD
+  providers:
+    fmp: GCUSD
+    yfinance: GC=F
+  intraday: fmp
+- canonical: CL=F
+  kinds:
+  - cfd
+  - futures
+  shared_series: true
+  asset_class: commodities
+  settlement_ccy: USD
+  providers:
+    fmp: CLUSD
+    yfinance: CL=F
+  intraday: fmp

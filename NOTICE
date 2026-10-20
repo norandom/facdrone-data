@@ -1,0 +1,41 @@
+facdrone-data
+Copyright 2026 Marius Ciepluch
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party data providers
+--------------------------
+
+facdrone-data ships no provider data. It contains adapters that download data from the
+providers below, with credentials the user supplies. The data a user downloads stays under
+each provider's own terms of use, which this licence does not change. Each user is
+responsible for holding the access the provider requires (an account, an API key or a paid
+plan) and for following the provider's terms, including attribution and any limit on
+storage or redistribution. The terms are linked from the providers' sites; the module's
+provider documentation records the attribution and redistribution status per provider.
+
+- Federal Reserve Economic Data (FRED), Federal Reserve Bank of St. Louis: read through
+  the FRED API with a free API key, under the FRED API terms of use. Some series are owned
+  by third parties and carry their own copyright.
+- Kenneth R. French Data Library, Tuck School of Business at Dartmouth: factor return
+  files downloaded from the library's public site.
+- AQR Capital Management Data Library: factor return files (Quality Minus Junk,
+  Betting Against Beta) downloaded from AQR's public site.
+- U.S. Commodity Futures Trading Commission (CFTC): Commitments of Traders reports,
+  published by a U.S. government agency.
+- OECD: consumer price statistics read through the OECD SDMX API, under the OECD's terms
+  and conditions for its data.
+- Yahoo Finance, through the yfinance library: yfinance is an independent open-source
+  project, not affiliated with or endorsed by Yahoo; data reached through it is subject to
+  Yahoo's terms of service.
+- Financial Modeling Prep (FMP): read through the FMP API with a paid subscription key
+  (optional extra "fmp"), under the FMP terms of service.
+- Dukascopy: historical tick data downloaded from Dukascopy's public data feed (optional
+  extra "dukascopy"), under Dukascopy's terms of use.
+
+Redistribution status: FMP, Yahoo Finance, Dukascopy, AQR and the Kenneth R. French Data
+Library are treated as "not redistributable, to be verified" (recorded on 2026-10-15).
+The module's tests use synthetic data and do not redistribute provider data.
+
+Provider names and trademarks belong to their owners. Their mention here describes what the
+adapters connect to and implies no endorsement or affiliation.

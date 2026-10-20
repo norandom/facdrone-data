@@ -1,0 +1,22 @@
+# Provider symbols for the example universe (one row per canonical series).
+# The universe is free-provider only: fmp is null, so Yahoo Finance prices every series
+# (the yfinance family covers exactly the symbols FMP does not map). With an FMP key, give a
+# series its FMP symbol and set `intraday: fmp`.
+- canonical: "^GSPC"
+  kind: cfd
+  asset_class: indices
+  settlement_ccy: USD
+  providers: {fmp: null, yfinance: "^GSPC"}
+  intraday: unavailable
+- canonical: "EURUSD=X"
+  kind: cfd
+  asset_class: forex
+  settlement_ccy: USD
+  providers: {fmp: null, yfinance: "EURUSD=X"}
+  intraday: unavailable
+- canonical: "GC=F"
+  kind: cfd
+  asset_class: commodities
+  settlement_ccy: USD
+  providers: {fmp: null, yfinance: "GC=F"}
+  intraday: unavailable

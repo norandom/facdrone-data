@@ -1,0 +1,122 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "facdrone-data"
+version = "0.1.0"
+description = "A point-in-time market-data store in PostgreSQL for research and trading systems: acquisition, provider adapters, an evidence ledger, bars, quality and freshness (first consumer: facdrone)"
+requires-python = ">=3.13"
+dependencies = [
+    "facdrone-data-types",
+    "pandas==2.3.3",
+    "numpy==2.2.6",
+    "sqlalchemy>=2",
+    "alembic>=1.13",
+    "psycopg[binary]>=3",
+    "typer>=0.12",
+    "pyarrow==23.0.1",
+    "pydantic~=2.12",
+    "openpyxl>=3.1.5",
+    "scikit-learn==1.7.2",
+    "PyYAML",
+    "yfinance==1.2.0",
+    "fredapi==0.5.2",
+    "cot-reports==0.1.3",
+]
+
+[project.optional-dependencies]
+# The Kedro pipeline wrapper (acquisition.create_pipeline) and the catalog's PIT dataset.
+kedro = ["kedro~=1.4.0", "kedro-datasets[pandas]>=8"]
+# The paid or rate-limited providers' HTTP client: declared here, never relied on transitively.
+fmp = ["requests>=2.32"]
+dukascopy = ["requests>=2.32"]
+# The test plugin (facdrone_data.testing): an embedded PostgreSQL per test process, no container.
+testing = ["pytest>=8", "pytest-xdist>=3.6", "pgembed>=0.2,<0.3"]
+
+[project.scripts]
+facdrone-data = "facdrone_data.cli.app:main"
+
+[tool.uv.sources]
+facdrone-data-types = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["facdrone_data*"]
+
+[tool.setuptools.package-data]
+facdrone_data = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+markers = [
+    "parity: golden tests against recorded reference outputs (skipped where the reference snapshot is absent)",
+    "port_baseline: conformance characterization against the reference implementation; excluded from the gates (`pytest -m port_baseline` opts in).",
+    "live_broker: reads a live broker paper account through credentials kept outside the repository. Never part of the gates; opt-in manual check: `pytest -m live_broker`.",
+    "db: needs a populated PostgreSQL database (end-to-end runs); excluded from the fast gate (`-m 'not db'`).",
+]
+
+# ── The module's own static gates (facdrone-data-manager 3.3, 7.1) ──────────────────────
+# Run from this directory: `ruff format --check .`, `ruff check .`, `mypy`. Inside the
+# workspace ruff resolves this file for every path below this directory, so the rules match
+# the main repository's (the same selection, line length and complexity limits).
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = [".", "types", "tests"]
+extend-exclude = ["build", "**/*.egg-info"]
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle errors
+    "W",       # pycodestyle warnings
+    "F",       # pyflakes
+    "I",       # isort
+    "UP",      # pyupgrade
+    "B",       # bugbear
+    "S",       # bandit security checks
+    "C901",    # complexity
+    "PLR0913", # parameter count
+    "ARG",     # unused arguments: dead interface surface
+]
+# PEP 695 syntax stays in its pre-3.12 form: the main repository's code measurement cannot
+# parse it yet.
+ignore = ["UP040", "UP046", "UP047"]
+
+[tool.ruff.lint.isort]
+# Until the core tests return to the core (task 2.7) and the test plugin moves here (2.6),
+# some tests import facdrone packages; they sort as first party, as in the main repository.
+known-first-party = ["facdrone", "facdrone_kernel", "facdrone_testing"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+
+[tool.ruff.lint.per-file-ignores]
+# Asserts are the point of tests; test doubles keep a signature they do not read.
+"tests/**" = ["S101", "ARG"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "types:.:tests"
+explicit_package_bases = true
+files = ["types/facdrone_data_types", "facdrone_data", "tools", "tests/test_module_gates.py"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# Provider SDKs and libraries that ship neither stubs nor a py.typed marker.
+module = [
+    "sklearn.*",
+    "kedro_datasets.*",
+    "openpyxl.*",
+    "yfinance.*",
+    "fredapi.*",
+    "cot_reports.*",
+    "grimp.*",
+]
+ignore_missing_imports = true

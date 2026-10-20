@@ -1,0 +1,59 @@
+# Generic private-literal patterns (facdrone-data-manager 5.1), applied to every line of the
+# module tree by tools/check_private_literals.py. The operator's own values are not here:
+# they are checked by salted digest (literal-digests.txt).
+
+[[pattern]]
+class = "private-ipv4"
+regex = '\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b'
+
+[[pattern]]
+class = "home-path"
+regex = '(?:/home/|/Users/)[A-Za-z0-9._-]+'
+
+[[pattern]]
+class = "email-address"
+regex = '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b'
+
+[[pattern]]
+class = "mandate-id"
+regex = '(?i)\b[a-z]+-[a-z-]*\d+k\b'
+
+[[pattern]]
+class = "account-number"
+regex = '(?i)\b(?:account|acct|login)(?:[ _#-]?(?:no|number|id|login))?\s*[:=#]?\s*[\x22\x27]?\d{6,12}\b'
+
+[[pattern]]
+class = "account-key"
+regex = '(?i)\b(?:account_(?:login|number|no|password)|broker_account|trading_account|mt[45]_(?:login|password|server)|ctrader_[a-z_]+)\b'
+
+[[pattern]]
+class = "credential-key"
+regex = '(?i)\b(?:client_secret|api_secret|private_key|access_token|refresh_token|passphrase)\b'
+
+[[pattern]]
+class = "broker-platform"
+regex = '(?i)\b(?:c-?trader|metatrader|mt[45])\b'
+
+[[pattern]]
+class = "prop-firm"
+regex = '(?i)\b(?:prop[- ]?firms?|funded[- ]trader|fundednext|the5ers|topstep|myforexfunds)\b'
+
+# The first consumer's vocabulary (a trading system) and its predecessor's name have no place
+# in a generic market-data store (facdrone-data-manager 2.9): a reintroduced mention fails.
+
+[[pattern]]
+class = "consumer-vocabulary"
+regex = '(?i)\b(?:mandates?|cppi|ftmo|breakers?|pods?)\b'
+
+[[pattern]]
+class = "consumer-vocabulary"
+regex = '(?i)\bdecision[- ](?:path|evidence|code|requests?|reads?|moment|inputs?|as-of|free|readable|engine)\b'
+
+[[pattern]]
+class = "predecessor-reference"
+regex = '\b[vV]1\b'
+
+# Allow-list: exact texts blanked before matching. Each one is a schema identifier or a
+# rendered schema text that other packages and the core's committed schema documents read
+# today; each entry names the step that removes it. Keep this list as short as possible.
+

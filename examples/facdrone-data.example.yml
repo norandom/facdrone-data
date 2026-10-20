@@ -1,0 +1,11 @@
+# facdrone-data example configuration: a free-provider universe for the quickstart.
+# Identity files are resolved relative to this file.
+identity_files:
+  - instruments.example.yml
+instruments:
+  - {canonical: "^GSPC", asset_class: indices, profit_ccy: USD}
+  - {canonical: "EURUSD=X", asset_class: forex, profit_ccy: USD}
+  - {canonical: "GC=F", asset_class: commodities, profit_ccy: USD}
+global_inputs: ["^VIX"]
+conversion_currency: USD
+default_source: "yfinance,fred"

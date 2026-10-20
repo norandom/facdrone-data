@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "facdrone-data-types"
+version = "1.0.0"
+description = "The generic vocabulary a point-in-time market-data store shares with its consumers: provider and symbol identity, acquisition ports, FX refusal, the trading-calendar protocol, freshness state, futures contract and series declarations"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["facdrone_data_types*"]
+
+[tool.setuptools.package-data]
+facdrone_data_types = ["py.typed"]

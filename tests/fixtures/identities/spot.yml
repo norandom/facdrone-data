@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+# Generic series identities for the module tests: provider tickers only.
+- canonical: AAPL
+  kind: cfd
+  asset_class: equities us
+  settlement_ccy: USD
+  providers:
+    fmp: AAPL
+    yfinance: AAPL
+  intraday: fmp
+- canonical: BTC-USD
+  kind: cfd
+  asset_class: crypto
+  settlement_ccy: USD
+  providers:
+    fmp: BTCUSD
+    yfinance: BTC-USD
+  intraday: fmp
+- canonical: DX-Y.NYB
+  kind: cfd
+  asset_class: indices
+  settlement_ccy: USD
+  providers:
+    fmp: DX-Y.NYB
+    yfinance: DX-Y.NYB
+  intraday: fmp
+- canonical: EURUSD=X
+  kind: cfd
+  asset_class: forex
+  settlement_ccy: USD
+  providers:
+    fmp: EURUSD
+    yfinance: EURUSD=X
+  intraday: fmp
+- canonical: KC=F
+  kind: cfd
+  asset_class: commodities
+  settlement_ccy: USD
+  providers:
+    fmp: KCUSX
+    yfinance: KC=F
+  intraday: fmp
+- canonical: ZW=F
+  kind: cfd
+  asset_class: commodities
+  settlement_ccy: USD
+  providers:
+    fmp: null
+    yfinance: ZW=F
+  intraday: unavailable
+- canonical: ^GDAXI
+  kind: cfd
+  asset_class: indices
+  settlement_ccy: EUR
+  providers:
+    fmp: ^GDAXI
+    yfinance: ^GDAXI
+  intraday: fmp
+- canonical: ^GSPC
+  kind: cfd
+  asset_class: indices
+  settlement_ccy: USD
+  providers:
+    fmp: ^GSPC
+    yfinance: ^GSPC
+  intraday: fmp

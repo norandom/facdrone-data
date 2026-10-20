@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+#
+# Secret scan (facdrone-data-manager 4.4): gitleaks' default rules plus the module's own
+# providers and its database connection. Run on the tree in CI and on the full history at
+# the extraction:
+#     gitleaks dir . --config .gitleaks.toml
+#     gitleaks git . --config .gitleaks.toml
+title = "facdrone-data secret scan"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "fmp-api-key"
+description = "Financial Modeling Prep API key"
+regex = '''(?i)(?:fmp_api_key|apikey|api_key)["']?\s*[:=]\s*["']?([A-Za-z0-9]{32})\b'''
+secretGroup = 1
+keywords = ["fmp_api_key", "apikey", "api_key"]
+
+[[rules]]
+id = "fred-api-key"
+description = "FRED API key (32 lower-case hexadecimal characters)"
+regex = '''(?i)fred_api_key["']?\s*[:=]\s*["']?([a-f0-9]{32})\b'''
+secretGroup = 1
+keywords = ["fred_api_key"]
+
+[[rules]]
+id = "postgres-dsn-password"
+description = "PostgreSQL connection string carrying a password"
+regex = '''postgres(?:ql)?(?:\+[a-z0-9]+)?://[^:@/\s'"]+:([^@\s'"]+)@[^\s'"]+'''
+secretGroup = 1
+keywords = ["postgres"]
+
+[allowlist]
+description = "Fixture values that only look like credentials"
+# Matched against the secret group alone, so a real key never matches: the two test DSNs'
+# placeholder passwords ("secret" in tests/test_data_cli.py, "y" in
+# tests/test_catalog_declarations.py) and an f-string field standing for a password.
+regexes = [
+    '''^(?:secret|y|\{[A-Za-z_][A-Za-z0-9_]*\})$''',
+]

@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+#
+# The module's own import contracts (facdrone-data-manager 1.2, 3.3). Run from this directory:
+#     lint-imports --config .importlinter
+# The graph is the production code of the two packages; the tests are not part of it.
+
+[importlinter]
+root_packages =
+    facdrone_data
+    facdrone_data_types
+# The facdrone packages are outside this graph: they are named as external packages.
+include_external_packages = True
+
+[importlinter:contract:no-facdrone]
+name = the module imports nothing from facdrone: not the core, the kernel or a satellite (1.2)
+type = forbidden
+source_modules =
+    facdrone_data
+    facdrone_data_types
+forbidden_modules =
+    facdrone
+    facdrone_kernel
+    facdrone_research
+    facdrone_reporting
+    facdrone_dash
+    facdrone_wire
+    facdrone_client
+    facdrone_observe
+    facdrone_testing
+# Remaining production edges into facdrone_kernel: none (measured 2026-10-15). A future edge
+# is never ignored silently: it is named here, one line per import, until the gap is closed
+# in facdrone_data_types (1.5).
+ignore_imports =
+
+[importlinter:contract:types-below-data]
+name = the data types import nothing from the data layer (types <- data)
+type = forbidden
+source_modules =
+    facdrone_data_types
+forbidden_modules =
+    facdrone_data
+
+[importlinter:contract:types-standard-library]
+name = the data types use only the standard library
+type = forbidden
+source_modules =
+    facdrone_data_types
+forbidden_modules =
+    numpy
+    pandas
+    pydantic
+    sqlalchemy
+    kedro
+    fastapi
+    typer
+    requests
+    yaml
+    psycopg
+    uvicorn
+    httpx
+# The port signatures name DataFrame for mypy under TYPE_CHECKING only.
+ignore_imports =
+    facdrone_data_types.ports -> pandas
+
+[importlinter:contract:acquisition-wall]
+name = acquisition and evidence do not import a provider (acquisition import-wall)
+type = forbidden
+source_modules =
+    facdrone_data.acquisition
+    facdrone_data.pit
+forbidden_modules =
+    facdrone_data.providers
+
+[importlinter:contract:pure-modules]
+name = the pure modules import no orchestration tier and not the PIT dataset
+type = forbidden
+source_modules =
+    facdrone_data.bars
+    facdrone_data.quality
+    facdrone_data.freshness
+    facdrone_data.contract_months
+    facdrone_data.coverage
+    facdrone_data.order_flow
+    facdrone_data.fx
+forbidden_modules =
+    facdrone_data.acquisition
+    facdrone_data.pit
+    facdrone_data.providers
+    facdrone_data.datasets

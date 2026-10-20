@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+#
+# The module's CI (facdrone-data-manager 3.6, requirements 7.1 and 7.4). The file sits under
+# packages/facdrone-data/.github/ in the workspace, where GitHub does not read it; it becomes
+# active when the extraction (step (d)) moves this directory to the repository root. Every
+# command runs from the repository root, which is the module directory today, so
+# `scripts/gates.sh unit data` in the workspace runs the same gates.
+#
+# Two jobs, both within `timeout-minutes: 15` (7.4): `static` (lint, types, the module's
+# gates) and `tests` (the suite on an embedded PostgreSQL that the module's own test plugin
+# starts per xdist worker from the `pgembed` wheel; no service container, no external
+# database, no network beyond the package index).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call: # the release workflow runs the same gates before it builds
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.12.23"
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  # The extras the suite and mypy need; the tools come from .github/ci-requirements.txt.
+  EXTRAS: "testing,kedro,fmp,dukascopy"
+
+jobs:
+  static:
+    name: static (lint, types, module gates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The size gate reads the commit message for a `Size-reason:` trailer. On a pull
+          # request the checkout is a merge commit; depth 2 keeps the pull request's head.
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            types/pyproject.toml
+            .github/ci-requirements.txt
+      - name: Install the module, its extras and the CI tools
+        # The environment lives outside the checkout, so the secret scan and the literal
+        # scan read only the repository's files.
+        run: |
+          uv venv "$RUNNER_TEMP/venv" --python 3.13
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --no-sources \
+            -e ./types -e ".[$EXTRAS]" -r .github/ci-requirements.txt
+      - name: Install gitleaks (pinned, checksum verified)
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: lint (ruff format)
+        run: ruff format --check .
+      - name: lint (ruff check)
+        run: ruff check .
+      - name: types (mypy --strict)
+        run: mypy
+      - name: import contracts
+        run: lint-imports --config .importlinter
+      - name: structure (no cycle, fan-out at most 15)
+        run: python tools/check_structure.py
+      - name: size (code and physical lines against .gates/size-baseline.json)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          git log -1 --format=%B "$HEAD_SHA" > "$RUNNER_TEMP/commit-message"
+          python tools/size_gate.py --message-file "$RUNNER_TEMP/commit-message"
+      - name: licence headers
+        run: python tools/check_headers.py
+      - name: private literals
+        run: python tools/check_private_literals.py
+      - name: secret scan (gitleaks)
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
+
+  tests:
+    name: tests (Python ${{ matrix.python }}, embedded PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.13. Python 3.14 joins when the numpy pin (2.2.6, no cp314
+        # wheel) moves: without a wheel the job would compile numpy from source.
+        python: ["3.13"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            types/pyproject.toml
+            .github/ci-requirements.txt
+      - name: Install the module, its extras and the CI tools
+        run: |
+          uv venv "$RUNNER_TEMP/venv" --python "${{ matrix.python }}"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --no-sources \
+            -e ./types -e ".[$EXTRAS]" -r .github/ci-requirements.txt
+      - name: Install gitleaks (the planted-secret test runs it)
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/bin" gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: pytest on the embedded PostgreSQL
+        # The runner's user is not root, so PostgreSQL starts (it refuses root). The plugin
+        # starts one server per xdist worker; `--dist loadgroup` keeps the tests that share
+        # the `pg_engine` database on one worker. FACDRONE_TEST_PG_DSN stays unset: the tests
+        # never reach a database other than their own embedded server.
+        run: >-
+          python -m pytest -q -n auto --dist loadgroup --timeout=300
+          -m "not port_baseline and not live_broker"

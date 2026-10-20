@@ -36,7 +36,13 @@ keywords = ["postgres"]
 description = "Fixture values that only look like credentials"
 # Matched against the secret group alone, so a real key never matches: the two test DSNs'
 # placeholder passwords ("secret" in tests/test_data_cli.py, "y" in
-# tests/test_catalog_declarations.py) and an f-string field standing for a password.
+# tests/test_catalog_declarations.py), an f-string field standing for a password, and the
+# synthetic FMP key of tests/test_credential_redaction.py (gitleaks' generic-api-key rule).
 regexes = [
-    '''^(?:secret|y|\{[A-Za-z_][A-Za-z0-9_]*\})$''',
+    '''^(?:secret|y|\{[A-Za-z_][A-Za-z0-9_]*\}|fmpkey-0123456789abcdef)$''',
+]
+# Bytecode and tool caches a local run leaves beside the sources (never tracked; a CI
+# checkout has none): a compiled test module holds the same placeholders.
+paths = [
+    '''(?:^|/)(?:__pycache__|\.mypy_cache|\.pytest_cache|\.ruff_cache|\.import_linter_cache)/''',
 ]

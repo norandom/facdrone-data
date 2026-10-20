@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Marius Ciepluch
+#
+# Release (facdrone-data-manager 3.6, requirements 8.5 and 9.4), a DRY RUN until step (e): on a
+# `vX.Y.Z` tag it runs the CI gates, builds the wheel and the sdist of both distributions
+# (facdrone-data and facdrone-data-types, lockstep versions), installs the wheels into a fresh
+# environment, and prints the release notes from CHANGELOG.md. It publishes nothing: no
+# GitHub release, no package index, no uploaded artifact. Step (e) adds the release step
+# (the four files and the changelog section) with `contents: write`, after the operator tags
+# the first release. Inert in the workspace like ci.yml: GitHub reads it once it is at the repository root.
+name: Release (dry run)
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch: # a build check without a tag; the version check is skipped
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.12.23"
+
+jobs:
+  gates:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build the wheels and sdists (nothing is published)
+    needs: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+      - name: The tag names the version of both distributions
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for project in pyproject.toml types/pyproject.toml; do
+            version="$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$project")"
+            if [ "$version" != "$tag" ]; then
+              echo "::error file=$project::version $version differs from the tag v$tag (lockstep versions)"
+              exit 1
+            fi
+          done
+      - name: Build both distributions
+        # --no-sources: the workspace source of facdrone-data-types does not exist outside
+        # the workspace; the wheel's metadata names the distribution and its version only.
+        run: |
+          uv build --no-sources --out-dir dist types
+          uv build --no-sources --out-dir dist .
+          ls -l dist
+          test "$(ls dist/*.whl | wc -l)" -eq 2
+          test "$(ls dist/*.tar.gz | wc -l)" -eq 2
+      - name: The wheels install into a fresh environment
+        run: |
+          uv venv "$RUNNER_TEMP/smoke" --python 3.13
+          VIRTUAL_ENV="$RUNNER_TEMP/smoke" uv pip install --no-sources dist/*.whl
+          "$RUNNER_TEMP/smoke/bin/facdrone-data" --help
+          "$RUNNER_TEMP/smoke/bin/python" -c "import facdrone_data.migrate, facdrone_data_types"
+      - name: The installed wheel migrates an embedded database
+        # The chain ships as package data; `db upgrade` from the wheel proves it is complete.
+        # pgembed comes with the `testing` extra's version; no other database is reached.
+        working-directory: ${{ runner.temp }}
+        run: |
+          VIRTUAL_ENV="$RUNNER_TEMP/smoke" uv pip install "pgembed==0.2.0"
+          "$RUNNER_TEMP/smoke/bin/python" - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          from facdrone_data.testing.pg_server import start
+
+          server = start()
+          try:
+              script = Path(sys.executable).with_name("facdrone-data")
+              env = {**os.environ, "FACDRONE_DATA_DSN": server.dsn}
+              for args in (["db", "upgrade"], ["db", "current"], ["db", "check"]):
+                  run = subprocess.run(
+                      [str(script), *args], env=env, capture_output=True, text=True, check=True
+                  )
+                  print(" ".join(args), "->", run.stdout.strip())
+          finally:
+              server.stop()
+          PY
+      - name: Release notes from CHANGELOG.md (printed, not published)
+        run: |
+          section="${GITHUB_REF_NAME#v}"
+          case "$GITHUB_REF" in refs/tags/v*) ;; *) section="Unreleased" ;; esac
+          awk -v want="$section" '
+            /^## / { inside = index($0, "[" want "]") > 0; if (printed && !inside) exit }
+            inside { print; printed = 1 }
+          ' CHANGELOG.md | tee "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::CHANGELOG.md has no section $section"; exit 1; }
+      - name: What step (e) would publish
+        run: |
+          echo "dry run: would attach these files and the notes above to release ${GITHUB_REF_NAME}"
+          sha256sum dist/*

@@ -21,8 +21,13 @@ All notable changes to this module are recorded here. The format follows
 - README, point-in-time rules, a guide to adding a family, credentials and versioning
   documents.
 
+- The module's own migration chain (`facdrone_data/migrations`, revision `fd0001_baseline`,
+  its version in `facdrone_data_alembic_version`) and `facdrone-data db upgrade|current|check|stamp`;
+  a database that already holds the tables is adopted with `db check` then `db stamp`.
+- A pytest plugin with an embedded PostgreSQL per test process (`facdrone_data.testing`, extra
+  `testing`).
+- The instrument tables key on `venue_symbol`, the venue's symbol for the instrument.
+
 ### Not yet present
 
-- `facdrone-data db upgrade` and the module's own migration chain. Until then the tables are
-  created from the declared schema (see the README quickstart).
 - The generated schema reference and entity-relationship documents for the module's tables.

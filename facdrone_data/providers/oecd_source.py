@@ -14,12 +14,8 @@ parses it with ``parse_oecd_sdmx_csv``: anchor
 ``TIME_PERIOD`` ``YYYY-MM`` to the first of the month, float-coerce ``OBS_VALUE``, and
 skip blank / non-parseable / out-of-shape rows (safe numeric).
 
-The network call is an injected ``OecdCsvFetch`` transport (a ``Callable[[], str]``
-returning the SDMX-CSV body) so the adapter is pure and offline-testable; the live
-transport (``live_oecd``) lazily imports ``urllib.request`` inside the factory and sets
-a browser ``User-Agent`` (the OECD endpoint 403s the default urllib UA) plus the SDMX
-``Accept`` header, so this module imports cleanly with no network import at top level.
-OECD is keyless — there is no API key to hold or log.
+The network call is an injected ``OecdCsvFetch`` transport (the SDMX-CSV body), so the
+adapter is offline-testable; ``live_oecd`` GETs through ``policy.fetch_url``. Keyless.
 """
 
 from __future__ import annotations
@@ -33,7 +29,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from facdrone_data.providers.policy import TIMEOUT_SECONDS as _TIMEOUT_SECONDS
+from facdrone_data.providers.policy import fetch_url
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -98,31 +94,14 @@ def parse_oecd_sdmx_csv(raw: str) -> pd.DataFrame:
 
 
 def live_oecd() -> OecdCsvFetch:
-    """The live ``urllib``-based transport (wired only at the composition root).
-
-    ``urllib.request`` is imported lazily so this module imports cleanly even when no
-    network stack is touched at import time. It issues a
-    ``urllib.request.Request`` with a browser ``User-Agent`` (the OECD endpoint 403s the
-    default urllib UA) plus the SDMX ``Accept`` header, then reads and UTF-8 decodes the
-    response body. OECD is keyless — there is no API key to hold or log.
-
-    ``start`` is the earliest period requested (only the year/month matter; the day is
-    dropped in the request)."""
-    import urllib.request  # lazy: the pure adapter carries no network import
+    """The live transport (wired only at the composition root): a GET with a browser
+    ``User-Agent`` (the OECD endpoint 403s urllib's) and the SDMX ``Accept`` header, decoded
+    as UTF-8. Keyless. ``start`` is the earliest period requested (year and month)."""
 
     def _get(start: str = "2010-01-01") -> str:
         url = f"{_OECD_JPN_CPI_URL}?startPeriod={start[:7]}"  # fixed https OECD endpoint
-        request = urllib.request.Request(  # noqa: S310  # nosemgrep: dynamic-urllib-use-detected
-            url,
-            headers={
-                "Accept": _OECD_SDMX_ACCEPT,
-                "User-Agent": _OECD_SDMX_USER_AGENT,
-            },
-        )
-        # nosemgrep: dynamic-urllib-use-detected
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # noqa: S310
-            body: bytes = response.read()
-        return body.decode("utf-8", errors="replace")
+        headers = {"Accept": _OECD_SDMX_ACCEPT, "User-Agent": _OECD_SDMX_USER_AGENT}
+        return fetch_url(Provider.OECD, url, headers).decode("utf-8", errors="replace")
 
     return _get
 

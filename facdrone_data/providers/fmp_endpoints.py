@@ -2,9 +2,10 @@
 # Copyright 2026 Marius Ciepluch
 """FMP request wrapper + per-endpoint fetchers (R2.2, R2.4).
 
-The wrapper prepends the ``apikey`` param, uses a 30s timeout, normalizes
-list/dict/string/error payloads, and **fails open**:
-any error returns ``[]`` so one bad family never aborts the download (R2.4).
+The wrapper prepends the ``apikey`` param, normalizes list/dict/string/error payloads, and
+**fails open**: any error returns ``[]`` so one bad family never aborts the download (R2.4).
+The live transport takes its timeout and its throttle retries from FMP's row in
+``providers.policy``; a throttle answer still standing after them fails open like any error.
 
 The HTTP call is an injected ``HttpJson`` transport so the wrapper is pure and
 testable offline; the live transport (``live_http_json``) is wired at the data
@@ -18,17 +19,19 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
+from time import sleep as _sleep
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
 from facdrone_data.credentials import redact
-from facdrone_data.providers.policy import TIMEOUT_SECONDS as _TIMEOUT_SECONDS
+from facdrone_data.providers.policy import POLICY, THROTTLE_STATUSES, Outcome, with_retries
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
-    from requests import Session
+    from requests import Response, Session
 
+    from facdrone_data.providers.policy import ProviderPolicy
     from facdrone_data_types.ports import FetchRequest
 
 FMP_BASE = "https://financialmodelingprep.com/stable"
@@ -96,8 +99,13 @@ def chunked_date_ranges(start: date, end: date, *, days: int) -> list[tuple[date
     return windows
 
 
-def live_http_json() -> HttpJson:
-    """The live transport, with one session created on its first request."""
+def live_http_json(
+    *,
+    policy: ProviderPolicy = POLICY[Provider.FMP],
+    sleep: Callable[[float], None] = _sleep,
+) -> HttpJson:
+    """The live transport, with one session created on its first request. A throttle answer
+    (429/503) is retried on the row's schedule; a network fault raises at once."""
     session: Session | None = None
 
     def _get(url: str, params: Mapping[str, str]) -> Any:
@@ -106,7 +114,13 @@ def live_http_json() -> HttpJson:
             import requests  # lazy: the pure wrapper carries no network import
 
             session = requests.Session()
-        response = session.get(url, params=params, timeout=_TIMEOUT_SECONDS)
+        opened = session
+
+        def _attempt() -> tuple[Response, Outcome]:
+            response = opened.get(url, params=params, timeout=policy.timeout_seconds)
+            return response, "throttle" if response.status_code in THROTTLE_STATUSES else "done"
+
+        response = with_retries(_attempt, policy, sleep)
         response.raise_for_status()
         return response.json()
 

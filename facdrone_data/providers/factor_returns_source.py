@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from facdrone_data.providers.kenfrench_source import KenFrenchZip, _unzip_first_member
-from facdrone_data.providers.policy import TIMEOUT_SECONDS as _TIMEOUT_SECONDS
+from facdrone_data.providers.policy import fetch_url
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -110,7 +110,6 @@ _AQR_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
-_AQR_TIMEOUT_SECONDS = 120  # the daily workbooks are ~30 MB
 
 # Fetch one AQR workbook as bytes. Tests inject this boundary.
 AqrFactorFile = Callable[[str], bytes]
@@ -231,17 +230,7 @@ def _parse_aqr_daily(payload: bytes) -> pd.DataFrame:
 def live_kenfrench_archive(archive: str) -> KenFrenchZip:
     """Build the live ZIP transport for one named Ken French daily archive."""
     url = _ARCHIVE_URLS[archive]
-
-    def _fetch_zip() -> bytes:
-        import urllib.request
-
-        with urllib.request.urlopen(  # noqa: S310, constant https URL
-            url, timeout=_TIMEOUT_SECONDS
-        ) as resp:
-            payload: bytes = resp.read()
-        return payload
-
-    return _fetch_zip
+    return lambda: fetch_url(Provider.KEN_FRENCH, url)
 
 
 @dataclass(frozen=True)
@@ -326,20 +315,13 @@ class AqrFactorReturnsClient:
 
 
 def live_aqr() -> AqrFactorFile:
-    """Build the live AQR workbook transport.
-
-    URLs come from fixed constants, not user input. The browser user-agent keeps AQR's CDN from
-    rejecting the request.
-    """
-    import urllib.request
+    """Build the live AQR workbook transport. The browser user-agent keeps AQR's CDN from
+    rejecting the request."""
 
     def _fetch(factor_id: str) -> bytes:
         url = _AQR_URLS.get(factor_id)
         if url is None:
             raise ValueError(f"no AQR Data Library URL for factor {factor_id!r}")
-        request = urllib.request.Request(url, headers={"User-Agent": _AQR_USER_AGENT})  # noqa: S310
-        with urllib.request.urlopen(request, timeout=_AQR_TIMEOUT_SECONDS) as resp:  # noqa: S310
-            payload: bytes = resp.read()
-        return payload
+        return fetch_url(Provider.AQR, url, {"User-Agent": _AQR_USER_AGENT})
 
     return _fetch

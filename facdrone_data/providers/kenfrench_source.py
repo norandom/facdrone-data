@@ -15,10 +15,8 @@ and the ``-99.99``/``-999`` sentinel→NULL conversion, so ``fetch`` keeps the r
 percent tokens and only does the *structural* parsing: skip to the header, read
 date rows, stop at the first non-eight-digit token (the blank line / annual block).
 
-The network call is an injected ``KenFrenchZip`` transport (``Callable[[],
-bytes]`` returning the zip bytes) so the adapter is pure and offline-testable;
-the live transport (``live_kenfrench``) lazily imports ``urllib.request`` inside
-the factory, so the module imports cleanly with no eager network import.
+The network call is an injected ``KenFrenchZip`` transport (the zip bytes), so the adapter
+is offline-testable; ``live_kenfrench`` GETs through ``policy.fetch_url``.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from facdrone_data.providers.policy import TIMEOUT_SECONDS as _TIMEOUT_SECONDS
+from facdrone_data.providers.policy import fetch_url
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -107,22 +105,9 @@ def _unzip_first_member(payload: bytes) -> str:
 
 
 def live_kenfrench() -> KenFrenchZip:
-    """The live ``urllib``-based transport (wired only at the composition root).
-
-    ``urllib.request`` is imported lazily so this module carries no eager network
-    import. It GETs the Dartmouth daily 3-factor
-    zip with a 30s timeout and return its bytes. Keyless — no credential to log."""
-    import urllib.request  # lazy: the pure adapter carries no network import
-
-    def _fetch_zip() -> bytes:
-        # URL is a fixed module constant (the Dartmouth endpoint), never user input.
-        with urllib.request.urlopen(  # noqa: S310 — constant https URL, not dynamic
-            _FAMA_FRENCH_URL, timeout=_TIMEOUT_SECONDS
-        ) as resp:
-            payload: bytes = resp.read()
-        return payload
-
-    return _fetch_zip
+    """The live transport (wired only at the composition root): the Dartmouth daily 3-factor
+    zip's bytes. Keyless."""
+    return lambda: fetch_url(Provider.KEN_FRENCH, _FAMA_FRENCH_URL)
 
 
 @dataclass(frozen=True)

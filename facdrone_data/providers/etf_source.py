@@ -24,11 +24,9 @@ This module is the LIVE fetch layer for the two ETF-adjacent families served by
   universe is imported from the normalizer module (the single source of
   truth) so the two can never drift.
 
-The price network call is the injected FMP :data:`HttpJson` transport, reused
-from :mod:`facdrone_data.providers.fmp_endpoints` (the ``FmpPriceClient``
-reference pattern), so the adapter is pure and offline-testable. The live
-``requests``-based transport (``live_http_json`` in that module) is wired only at
-the data composition root. The API key is held privately and never logged.
+The price network call is the injected FMP :data:`HttpJson` transport of
+:mod:`facdrone_data.providers.fmp_endpoints`, so the adapter is offline-testable; the live
+one is wired at the composition root. The API key is never logged.
 """
 
 from __future__ import annotations
@@ -40,6 +38,7 @@ import pandas as pd
 
 from facdrone_data.acquisition.families.normalizers.oecd_etf import _ETF_META_COLUMNS, _ETF_UNIVERSE
 from facdrone_data.providers.fmp_endpoints import HttpJson, fmp_get
+from facdrone_data.providers.policy import POLICY
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -54,16 +53,10 @@ _ETF_PRICE_COLUMNS = ("symbol", "date", "open", "high", "low", "close", "volume"
 
 
 def live_etf() -> HttpJson:
-    """The live FMP HTTP transport for the ETF feed (wired at the composition root).
-
-    ETF prices are an FMP endpoint, so the live transport is the shared
-    ``requests``-based :func:`live_http_json` — re-exported here as the ETF
-    factory so the composition root has one ``live_<x>()`` per provider module.
-    ``requests`` is imported lazily inside that factory, so this module imports
-    cleanly with no network import at top level."""
+    """FMP's live transport (``live_http_json``) with the ETF row of the policy table."""
     from facdrone_data.providers.fmp_endpoints import live_http_json
 
-    return live_http_json()
+    return live_http_json(policy=POLICY[Provider.ETF])
 
 
 @dataclass(frozen=True)

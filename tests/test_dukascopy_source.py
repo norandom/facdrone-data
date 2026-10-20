@@ -12,7 +12,6 @@ import pytest
 
 from facdrone_data.providers.dukascopy_source import (
     _HEADERS,
-    _HOUR_RETRIES,
     DukascopyOrderFlowClient,
     _parse_bi5,
     live_dukascopy,
@@ -80,7 +79,7 @@ def test_live_fetch_hour_retries_then_swallows_a_persistent_fault() -> None:
         session.return_value.get.side_effect = requests.ConnectionError("network down")
         fetch_hour = live_dukascopy(sleep=sleeps.append)
         assert fetch_hour("XAUUSD", datetime(2024, 1, 9, 10)) is None
-        assert session.return_value.get.call_count == _HOUR_RETRIES
+        assert session.return_value.get.call_count == 3
     assert sleeps == [1, 2]
 
 

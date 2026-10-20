@@ -13,8 +13,15 @@ What it contains:
 - the provider adapters (`facdrone_data/providers`);
 - the point-in-time filter (`facdrone_data.pit.point_in_time_view`) and the catalog
   dataset that applies it (`facdrone_data/datasets`);
+- the store's own migration chain (`facdrone_data/migrations`, `facdrone-data db ...`);
+- a pytest plugin with an embedded PostgreSQL per test process (`facdrone_data.testing`,
+  extra `testing`);
 - bars, quality detectors and freshness rules;
 - the `facdrone-data` command line.
+
+The schema has 37 tables: price panels, revisioned point-in-time observations, the provider
+families and instrument reference data. The instrument tables key on `venue_symbol`, the
+venue's symbol for the instrument.
 
 ## Install
 
@@ -31,8 +38,9 @@ pip install ./facdrone-data
 | Extra | Adds | For |
 |---|---|---|
 | `kedro` | `kedro`, `kedro-datasets` | the Kedro pipeline wrapper and the catalog dataset |
-| `fmp` | `requests` | the Financial Modeling Prep families (paid key) |
+| `fmp` | `requests` | the Financial Modeling Prep families (paid key; tested on the FMP Ultimate plan; endpoint coverage assumed on Ultimate, to be verified against the plan page) |
 | `dukascopy` | `requests` | Dukascopy tick-derived order flow |
+| `testing` | `pytest`, `pytest-xdist`, `pgembed` | the test plugin: `pytest_plugins = ["facdrone_data.testing.plugin"]` |
 
 ```
 pip install "./facdrone-data[fmp,dukascopy]"
@@ -71,11 +79,6 @@ prices) for the example universe, and reads the stored prices as of a date. It n
 PostgreSQL server and network access to Yahoo Finance. Run it from the module directory so
 the example configuration is found.
 
-`facdrone-data db upgrade` does not exist yet. The module's own migration chain is a later
-step, and the command line has five commands: `download`, `refetch`, `update`, `quality` and
-`status`. Until the chain lands, the tables are created from the declared schema, which is
-the schema a later `db upgrade` will build.
-
 A URL without a password uses the libpq defaults (`PGUSER`, `PGPASSFILE`); a URL may also
 carry the user and password.
 
@@ -85,19 +88,18 @@ export FACDRONE_DATA_DSN="postgresql+psycopg://localhost/facdrone_data"
 export FACDRONE_DATA_CONFIG=examples/facdrone-data.example.yml
 ```
 
-Create the tables:
+Create the tables and record the schema version:
 
-```python
-import os
-
-from sqlalchemy import create_engine
-
-from facdrone_data.acquisition.schema import metadata
-
-engine = create_engine(os.environ["FACDRONE_DATA_DSN"])
-metadata.create_all(engine)
-engine.dispose()
+```bash
+facdrone-data db upgrade        # prints schema=fd0001_baseline
+facdrone-data db current
 ```
+
+The store records its revision in its own table, `facdrone_data_alembic_version`, so it
+can share a database with a consumer's own migration chain. A database that already
+holds the store's tables but no version table is refused: `facdrone-data db check` lists
+every difference against the schema, and `facdrone-data db stamp fd0001_baseline` adopts
+it once `check` reports none.
 
 Download one window for the universe in the example configuration (`^GSPC`, `EURUSD=X`,
 `GC=F`), then look at what is stored:

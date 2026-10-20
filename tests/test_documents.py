@@ -3,17 +3,21 @@
 """The documents (facdrone-data-manager 3.5; R5.2, R8.1, R8.3, R8.4, R9.4).
 
 The README quickstart runs as written on the embedded database, with the provider clients
-replaced by the fakes the download tests use, so no request leaves the machine. The worked
+replaced by the fakes the download tests use, so no request leaves the machine. Its ``db``
+commands and the adoption path the README describes go through the console script's own
+``main``; no test reaches a database other than the embedded server's. The worked
 point-in-time examples execute, and the documents stay generic.
 """
 
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import re
 import shlex
 import sys
+import tomllib
 import types
 import uuid
 from collections.abc import Iterator
@@ -23,10 +27,12 @@ from typing import cast
 
 import pytest
 import typer
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, inspect, text
 from typer.testing import CliRunner
 
-from facdrone_data.cli.app import compose_data_cli
+from facdrone_data import migrate
+from facdrone_data.acquisition.schema import metadata
+from facdrone_data.cli.app import compose_data_cli, main
 from facdrone_data.cli.compose import live_backend
 from facdrone_data.testing.fakes import FakeMarketDataClient
 from facdrone_data_types.ports import MarketDataClient
@@ -37,6 +43,8 @@ README = MODULE / "README.md"
 DOCUMENTS = (README, MODULE / "CHANGELOG.md", *sorted((MODULE / "docs").glob("*.md")))
 TODAY = datetime(2025, 1, 11, 12, tzinfo=UTC)
 FENCE = re.compile(r"```(bash|python)\n(.*?)```", re.DOTALL)
+# A command in a code block (at the start of a line) or in running text (after a backtick).
+COMMAND = re.compile(r"(?:^|`)facdrone-data ([a-z]+(?: [a-z]+)?)", re.MULTILINE)
 # Written in pieces so this file is not itself a hit for the literal scan.
 FORBIDDEN = ("ft" + "mo", "/ho" + "me/", "man" + "date", "bro" + "ker")
 
@@ -67,6 +75,21 @@ def quickstart_database(pg_engine: Engine) -> Iterator[tuple[str, str]]:
         admin.dispose()
 
 
+def _readme() -> str:
+    return README.read_text(encoding="utf-8")
+
+
+def _entry_point(arguments: list[str]) -> tuple[int, str]:
+    """``facdrone-data <arguments>`` through the console script's ``main``, in process."""
+    printed = io.StringIO()
+    with pytest.MonkeyPatch.context() as patch, contextlib.redirect_stdout(printed):
+        patch.setattr(sys, "argv", ["facdrone-data", *arguments])
+        with pytest.raises(SystemExit) as exited:
+            main()
+    code = exited.value.code
+    return (code if isinstance(code, int) else 1), printed.getvalue()
+
+
 def _fake_clients(_credentials: object) -> dict[Provider, MarketDataClient]:
     return cast(
         "dict[Provider, MarketDataClient]",
@@ -95,12 +118,16 @@ class _Quickstart:
         self.monkeypatch.setenv(variable, self.dsn if variable == "FACDRONE_DATA_DSN" else value)
 
     def facdrone_data(self, arguments: list[str]) -> None:
-        result = CliRunner().invoke(self.app, arguments)
-        assert result.exit_code == 0, self.scrub(result.output)
-        self.printed += result.output
+        if arguments[:1] == ["db"]:  # the db group is wired by main, as the console script runs
+            code, output = _entry_point(arguments)
+        else:  # the download commands on the fake clients and the fixed clock
+            result = CliRunner().invoke(self.app, arguments)
+            code, output = result.exit_code, result.output
+        assert code == 0, self.scrub(output)
+        self.printed += output
 
     def command(self, line: str) -> None:
-        words = shlex.split(line)
+        words = shlex.split(line, comments=True)
         handlers = {
             "createdb": self.createdb,
             "export": self.export,
@@ -143,6 +170,19 @@ def test_the_quickstart_runs_as_written(
             run.shell(body)
 
     assert run.commands[:1] == ["createdb"]
+    # `db upgrade` and `db current` print the revision, recorded in the store's own table.
+    assert run.printed.count(f"schema={migrate.BASELINE}\n") == 2, run.scrub(run.printed)
+    assert f"`{migrate.VERSION_TABLE}`" in _readme()
+    engine = create_engine(dsn)
+    try:
+        assert set(inspect(engine).get_table_names()) >= {*metadata.tables, migrate.VERSION_TABLE}
+        with engine.connect() as connection:
+            recorded = connection.execute(
+                text("SELECT version_num FROM facdrone_data_alembic_version")
+            )
+            assert recorded.scalars().all() == [migrate.BASELINE]
+    finally:
+        engine.dispose()
     totals = [line for line in run.printed.splitlines() if line.startswith("families=")]
     assert totals, run.scrub(run.printed)
     inserted = re.search(r"inserted=(\d+)", totals[0])
@@ -152,13 +192,70 @@ def test_the_quickstart_runs_as_written(
     assert "2025-01-09" not in queried and "2025-01-10" not in queried
 
 
+def _commands(help_text: str) -> set[str]:
+    """The command names of a typer help screen's Commands panel."""
+    panel = help_text.split("Commands", 1)[1]
+    return set(re.findall(r"^\W+([a-z]+)\s", panel, re.MULTILINE))
+
+
 def test_the_readme_names_only_commands_the_command_line_has() -> None:
-    app = compose_data_cli(lambda options: live_backend(options, {}, _clock), _clock)
-    help_text = CliRunner().invoke(app, ["--help"]).output
-    for command in ("download", "refetch", "update", "quality", "status"):
-        assert command in help_text
-    if "upgrade" not in help_text:  # until the module's migration command lands
-        assert "does not exist yet" in README.read_text(encoding="utf-8")
+    code, top = _entry_point(["--help"])
+    assert code == 0
+    _, db = _entry_point(["db", "--help"])
+    named = set(COMMAND.findall(_readme()))
+    assert {"download", "status", "db upgrade", "db current", "db check", "db stamp"} <= named
+    for command in named:
+        group, _, sub = command.partition(" ")
+        assert group in _commands(top), command
+        assert not sub or sub in _commands(db), command
+
+
+def test_the_readme_adoption_path_runs(
+    quickstart_database: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Store tables without the version table: refused, then `db check` and `db stamp`."""
+    readme = _readme()
+    for written in ("`facdrone-data db check`", f"`facdrone-data db stamp {migrate.BASELINE}`"):
+        assert written in readme
+    _name, dsn = quickstart_database
+    monkeypatch.setenv("FACDRONE_DATA_DSN", dsn)
+    engine = create_engine(dsn)
+    try:
+        metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    code, refused = _entry_point(["db", "upgrade"])
+    assert code == 1 and "db check" in refused and f"db stamp {migrate.BASELINE}" in refused
+    assert _entry_point(["db", "check"]) == (0, "schema matches\n")
+    adopted = (0, f"schema={migrate.BASELINE}\n")
+    assert _entry_point(["db", "stamp", migrate.BASELINE]) == adopted
+    assert _entry_point(["db", "current"]) == adopted
+
+
+def test_the_readme_states_the_schema_and_the_testing_extra() -> None:
+    readme = _readme()
+    stated = re.search(r"The schema has (\d+) tables", readme)
+    assert stated is not None and int(stated.group(1)) == len(metadata.tables)
+    for table in ("contract_specs", "instrument_metadata_version"):
+        assert "venue_symbol" in metadata.tables[table].primary_key.columns
+    plugin = 'pytest_plugins = ["facdrone_data.testing.plugin"]'
+    assert plugin in readme
+    assert plugin in (MODULE / "tests" / "conftest.py").read_text(encoding="utf-8")
+    adds = re.search(r"^\| `testing` \| (.*?) \|", readme, re.MULTILINE)
+    assert adds is not None
+    project = tomllib.loads((MODULE / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    extra = {
+        re.split(r"[<>=~ \[]", item)[0] for item in project["optional-dependencies"]["testing"]
+    }
+    assert set(re.findall(r"`([\w-]+)`", adds.group(1))) == extra
+
+
+def test_the_family_guide_names_store_tables() -> None:
+    guide = (MODULE / "docs" / "adding_a_family.md").read_text(encoding="utf-8")
+    review_rule = guide[guide.index("Review rule") : guide.index("## 2.")]
+    named = re.findall(r"`([a-z_]+)`", review_rule.split("repository):", 1)[1])
+    assert named and set(named) <= set(metadata.tables), set(named) - set(metadata.tables)
 
 
 def test_the_point_in_time_examples_run() -> None:

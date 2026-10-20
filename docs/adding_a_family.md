@@ -14,9 +14,18 @@ key. The primary key is the family's natural key: the registry refuses a port wh
 (a `DateTime` column) when the write time should be recorded; the normaliser fills it from the
 injected clock.
 
-Migration: the module's own migration chain has not landed yet (see the README quickstart),
-so today the table is created from `metadata`. When the chain exists, a schema change gets a
-revision in it and, under `docs/versioning.md`, is a major version.
+Migration: add a revision under `facdrone_data/migrations/versions/` (plain DDL, no import
+of application metadata, `down_revision` the current head) and declare the table in
+`facdrone_data/acquisition/schema.py`. `facdrone-data db check` must report no difference
+on a database built by the chain. Under `docs/versioning.md` a schema change is a major
+version.
+
+Review rule (requirement 2.5): a revision that alters a table a consumer reads names the
+consumer's dependent code in its docstring and its pull request. The first consumer reads
+these tables (`CORE_READ_TABLES`, maintained from the consuming repository):
+`cftc_cot`, `contract_specs`, `daily_prices`, `factor_returns`, `fmp_balance_sheet`,
+`fmp_cash_flow`, `fmp_economic_calendar`, `fmp_income_statement`, `fred_series`,
+`instrument_metadata_version`, `intraday_prices`.
 
 ## 2. The provider client
 

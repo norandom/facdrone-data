@@ -101,6 +101,12 @@ holds the store's tables but no version table is refused: `facdrone-data db chec
 every difference against the schema, and `facdrone-data db stamp fd0001_baseline` adopts
 it once `check` reports none.
 
+A consumer whose own Alembic environment applies this chain before its own revisions
+inherits the same refusal, so on a database that already holds the store's tables the order
+is: adopt first (`facdrone-data db check`, which must print `schema matches`, then
+`facdrone-data db stamp fd0001_baseline`), then run the consumer's upgrade. The stamp writes
+only the store's version table; the consumer's chain and its version table are untouched.
+
 Download one window for the universe in the example configuration (`^GSPC`, `EURUSD=X`,
 `GC=F`), then look at what is stored:
 

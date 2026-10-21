@@ -20,3 +20,9 @@
   settlement_ccy: USD
   providers: {fmp: null, yfinance: "GC=F"}
   intraday: unavailable
+- canonical: "^VIX"
+  kind: cfd
+  asset_class: indices
+  settlement_ccy: USD
+  providers: {fmp: null, yfinance: "^VIX"}
+  intraday: unavailable

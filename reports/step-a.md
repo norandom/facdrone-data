@@ -168,7 +168,7 @@ saying there are no rows, which may be worth a follow-up.
 
 ## T1
 
-The T1 probe was not run. No file of the consuming project's measured path changed in this task. The pin stays
+No simulation hash was run for this task: no file of the consuming project's measured path changed. Its pinned hash stays
 `c164dc0f695580d15fafa94e80055d3ca9828de03dab2504c1dc059d1402d2a4`, as recorded in
 `.kiro/steering/tech.md` and last measured 2026-10-20 11:59 (task 2.1).
 

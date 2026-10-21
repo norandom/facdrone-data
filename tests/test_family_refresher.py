@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import Engine, select
 
 from facdrone_data.acquisition.families.cursors import MinMaxRangeGapFill
+from facdrone_data.acquisition.families.normalizers.oecd_etf import oecd_etf_families
 from facdrone_data.acquisition.families.ports import FamilyPort, Normalizer
 from facdrone_data.acquisition.families.refresher import (
     DownloadInputs,
@@ -23,12 +24,14 @@ from facdrone_data.acquisition.families.refresher import (
 from facdrone_data.acquisition.families.symbol_mapping import ProviderSymbols
 from facdrone_data.acquisition.instrument_table import InstrumentTable
 from facdrone_data.acquisition.merge import UpsertPanel
-from facdrone_data.acquisition.schema import DAILY_PRICES
+from facdrone_data.acquisition.schema import DAILY_PRICES, ETF_META
 from facdrone_data.acquisition.symbol_registry import SymbolConfigError
 from facdrone_data.acquisition.validation import KeepAll
+from facdrone_data.providers.etf_source import EtfClient
 from facdrone_data.quality.ensemble import EnsembleValidator
-from facdrone_data.testing import EURUSD
+from facdrone_data.testing import API_KEY, EURUSD
 from facdrone_data.testing.fakes import FakeMarketDataClient
+from facdrone_data.testing.plugin import empty_tables
 from facdrone_data_types.enums import AssetClass
 from facdrone_data_types.ports import FetchRequest, SymbolRegistry
 from facdrone_data_types.symbols import CanonicalSymbol, Provider
@@ -197,3 +200,31 @@ def test_refresher_fails_open_when_a_transport_raises(prices_engine: Engine) -> 
     report = FamilyRefresher().run(inputs)  # must not raise
     assert report.summaries[0].fetched == 0
     assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0
+
+
+def _no_network(url: str, params: object) -> object:
+    raise AssertionError("etf_meta is the static universe; it must not reach the network")
+
+
+def test_a_family_without_a_date_axis_lands_with_no_cursor(pg_engine: Engine) -> None:
+    """Replays the nightly refresh failure of 2026-10-15 to 2026-10-20: ``upsert_etf_meta``
+    stamps availability on ``symbol``, and the run cursor parsed its first scope "SPY" as a
+    date (``DateParseError``), aborting the refresh before ``refresh_etf_daily`` ran."""
+    meta = next(port for port in oecd_etf_families() if port.writer == "upsert_etf_meta")
+    client = EtfClient(transport=_no_network, api_key=API_KEY)
+    inputs = replace(
+        _inputs(pg_engine, ()),
+        families=(replace(meta, scopes=("SPY", "TLT")),),
+        clients={Provider.ETF: client},
+    )
+    empty_tables(pg_engine, ETF_META)
+    try:
+        report = FamilyRefresher().run(inputs)  # raised DateParseError on "SPY"
+        stored = set(pd.read_sql(select(ETF_META.c.symbol), pg_engine)["symbol"])
+    finally:
+        empty_tables(pg_engine, ETF_META)
+    assert [(row.scope, row.inserted, row.cursor) for row in report.summaries] == [
+        ("SPY", 1, None),
+        ("TLT", 1, None),
+    ]
+    assert stored == {"SPY", "TLT"}

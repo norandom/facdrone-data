@@ -28,6 +28,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 import pandas as pd
+from sqlalchemy import Date, DateTime
 
 from facdrone_data.acquisition.families.ports import FamilyPort
 from facdrone_data.acquisition.requirement import DataCoverageReport
@@ -203,7 +204,7 @@ class FamilyRefresher:
                 usable_gap_responses += 1
                 receipt = port.merge_strategy.merge(inputs.engine, port.target_table, gated)
                 fetched += len(gated)
-                cursor = _latest(cursor, gated[port.availability_column])
+                cursor = _latest(cursor, port, gated)
                 inserted += receipt.inserted
                 updated += receipt.updated
             outcome = _provider_outcome(
@@ -211,25 +212,19 @@ class FamilyRefresher:
                 raw_provider_responses,
                 len(gaps),
             )
-            out.append(
-                FamilySummary(
-                    port.writer,
-                    label,
-                    fetched,
-                    0,
-                    inserted,
-                    updated,
-                    outcome,
-                    quarantined,
-                    cursor,
-                )
-            )
+            counts = (fetched, 0, inserted, updated)
+            out.append(FamilySummary(port.writer, label, *counts, outcome, quarantined, cursor))
         return out
 
 
-def _latest(cursor: date | None, availability: pd.Series) -> date | None:
-    """The later of the running cursor and the newest availability value in a landed frame."""
-    newest = pd.to_datetime(availability).max()
+def _latest(cursor: date | None, port: FamilyPort, frame: pd.DataFrame) -> date | None:
+    """The later of the running cursor and the newest availability date in a landed frame.
+
+    Only a date axis has a cursor: ``etf_meta`` stamps availability on ``symbol`` and the
+    positions summary on ``year``, and parsing "SPY" as a date aborted the whole refresh."""
+    if not isinstance(port.target_table.c[port.availability_column].type, (Date, DateTime)):
+        return cursor
+    newest = pd.to_datetime(frame[port.availability_column]).max()
     if pd.isna(newest):
         return cursor
     landed = newest.date()

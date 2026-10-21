@@ -205,10 +205,7 @@ class FmpMacroClient:
 
 
 def live_fmp_macro(api_key: str) -> FmpMacroClient:
-    """Build the live client over the ``requests``-based FMP transport.
-
-    Wired only at the data composition root; ``requests`` is imported lazily
-    inside ``live_http_json`` so this module carries no network import."""
+    """The live client over the FMP transport (``requests`` loads inside ``live_http_json``)."""
     from facdrone_data.providers.fmp_endpoints import live_http_json
 
     return FmpMacroClient(transport=live_http_json(), api_key=api_key)

@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-from facdrone_data.providers.fmp_endpoints import HttpJson, fmp_get
+from facdrone_data.providers.fmp_endpoints import HttpJson, fmp_get, live_http_json
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -205,10 +205,5 @@ def _period_key(frame: pd.DataFrame) -> pd.Series:
 
 
 def live_fmp_fundamentals(api_key: str) -> FmpFundamentalsClient:
-    """Build the live client over the ``requests``-based FMP transport.
-
-    Wired only at the data composition root; ``requests`` is imported lazily
-    inside ``live_http_json`` so this module carries no network import."""
-    from facdrone_data.providers.fmp_endpoints import live_http_json
-
+    """The live client over the FMP transport (``requests`` loads inside ``live_http_json``)."""
     return FmpFundamentalsClient(transport=live_http_json(), api_key=api_key)

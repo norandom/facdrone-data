@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from facdrone_data.providers.fmp_endpoints import HttpJson, fmp_get
+from facdrone_data.providers.fmp_endpoints import HttpJson, fmp_get, live_http_json
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -77,10 +77,5 @@ class FmpCotClient:
 
 
 def live_fmp_cot(api_key: str) -> FmpCotClient:
-    """Build the live client over the ``requests``-based FMP transport.
-
-    Wired only at the data composition root; ``requests`` is imported lazily
-    inside ``live_http_json`` so this module carries no network import."""
-    from facdrone_data.providers.fmp_endpoints import live_http_json
-
+    """The live client over the FMP transport (``requests`` loads inside ``live_http_json``)."""
     return FmpCotClient(transport=live_http_json(), api_key=api_key)

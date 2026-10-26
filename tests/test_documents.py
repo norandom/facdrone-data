@@ -45,6 +45,7 @@ TODAY = datetime(2025, 1, 11, 12, tzinfo=UTC)
 FENCE = re.compile(r"```(bash|python)\n(.*?)```", re.DOTALL)
 # A command in a code block (at the start of a line) or in running text (after a backtick).
 COMMAND = re.compile(r"(?:^|`)facdrone-data ([a-z]+(?: [a-z]+)?)", re.MULTILINE)
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 # Written in pieces so this file is not itself a hit for the literal scan.
 FORBIDDEN = ("ft" + "mo", "/ho" + "me/", "man" + "date", "bro" + "ker")
 
@@ -193,8 +194,12 @@ def test_the_quickstart_runs_as_written(
 
 
 def _commands(help_text: str) -> set[str]:
-    """The command names of a typer help screen's Commands panel."""
-    panel = help_text.split("Commands", 1)[1]
+    """The command names of a typer help screen's Commands panel.
+
+    Typer forces a styled terminal when ``GITHUB_ACTIONS`` is set (read at import), so the
+    hosted runner's help text carries ANSI escapes; they are stripped before the panel is read.
+    """
+    panel = ANSI_ESCAPE.sub("", help_text).split("Commands", 1)[1]
     return set(re.findall(r"^\W+([a-z]+)\s", panel, re.MULTILINE))
 
 

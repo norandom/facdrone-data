@@ -157,3 +157,4 @@ providers the adapters connect to. The module ships no provider data; data you d
 under each provider's own terms, and several providers' data may not be redistributed.
 [`docs/providers.md`](docs/providers.md) lists each provider, what is fetched, the plan assumed,
 the credential variable and the terms reading, each marked to be verified.
+

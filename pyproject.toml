@@ -37,6 +37,24 @@ testing = ["pytest>=8", "pytest-xdist>=3.6", "pgembed>=0.2,<0.3"]
 [project.scripts]
 facdrone-data = "facdrone_data.cli.app:main"
 
+[dependency-groups]
+# The CI tools, pinned to the versions the gates pass with (was
+# .github/ci-requirements.txt inside the workspace). A group, so the wheel does not
+# publish it.
+dev = [
+    "ruff==0.15.17",
+    "mypy==2.1.0",
+    "import-linter==2.11",
+    "grimp==3.14",
+    "pytest-timeout==2.4.0",
+    "pandas-stubs==3.0.3.260530",
+    "types-PyYAML==6.0.12.20260518",
+]
+
+[tool.uv.workspace]
+# The repository root is the workspace; facdrone-data-types is its one member.
+members = ["types"]
+
 [tool.uv.sources]
 facdrone-data-types = { workspace = true }
 

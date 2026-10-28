@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Marius Ciepluch
 #
-# Release (facdrone-data-manager 3.6, requirements 8.5 and 9.4), a DRY RUN until step (e): on a
-# `vX.Y.Z` tag it runs the CI gates, builds the wheel and the sdist of both distributions
-# (facdrone-data and facdrone-data-types, lockstep versions), installs the wheels into a fresh
-# environment, and prints the release notes from CHANGELOG.md. It publishes nothing: no
-# GitHub release, no package index, no uploaded artifact. Step (e) adds the release step
-# (the four files and the changelog section) with `contents: write`, after the operator tags
-# the first release. Inert in the workspace like ci.yml: GitHub reads it once it is at the repository root.
-name: Release (dry run)
+# Release (facdrone-data-manager 3.6 and 5.1, requirements 8.5 and 9.4): on a `vX.Y.Z` tag it
+# runs the CI gates, checks that the tag names the version of both distributions
+# (facdrone-data and facdrone-data-types, lockstep versions), builds the wheel and the sdist of
+# each, installs the wheels into a fresh environment, takes the tag's section of CHANGELOG.md
+# and creates the GitHub release for the tag: the two wheels and the two sdists attached, the
+# changelog section as its notes. Nothing goes to a package index and no workflow artifact is
+# uploaded. `workflow_dispatch` is a build check: the same build and smoke steps, nothing
+# published. Inert in the workspace like ci.yml: GitHub reads it once it is at the repository root.
+name: Release
 
 on:
   push:
     tags: ["v*.*.*"]
-  workflow_dispatch: # a build check without a tag; the version check is skipped
+  workflow_dispatch: # a build check without a tag; the version check and the release are skipped
 
 permissions:
   contents: read
@@ -26,12 +27,19 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   build:
-    name: build the wheels and sdists (nothing is published)
+    name: build the wheels and sdists, release them on a tag
     needs: gates
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The release step creates the GitHub release; only this job may write, and only that
+    # step is handed the token.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The build steps run third-party build backends; they get no credential in .git.
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
@@ -88,16 +96,39 @@ jobs:
           finally:
               server.stop()
           PY
-      - name: Release notes from CHANGELOG.md (printed, not published)
+      - name: Release notes from CHANGELOG.md
+        # The body of the `## [X.Y.Z]` section, its heading left out (the release names the
+        # tag). On a tag the section must exist and say something; without a tag the
+        # `Unreleased` section is printed and may be empty.
         run: |
           section="${GITHUB_REF_NAME#v}"
           case "$GITHUB_REF" in refs/tags/v*) ;; *) section="Unreleased" ;; esac
-          awk -v want="$section" '
-            /^## / { inside = index($0, "[" want "]") > 0; if (printed && !inside) exit }
-            inside { print; printed = 1 }
-          ' CHANGELOG.md | tee "$RUNNER_TEMP/notes.md"
-          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::CHANGELOG.md has no section $section"; exit 1; }
-      - name: What step (e) would publish
+          awk -v want="## [$section]" '
+            /^## / && inside { inside = 0; done = 1 }
+            /^## / && !done && index($0, want) == 1 { inside = 1; found = 1; next }
+            inside { print }
+            END { exit found ? 0 : 1 }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md" \
+            || { echo "::error file=CHANGELOG.md::no section [$section]"; exit 1; }
+          cat "$RUNNER_TEMP/notes.md"
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md" \
+                || { echo "::error file=CHANGELOG.md::section [$section] is empty"; exit 1; }
+              ;;
+          esac
+          sha256sum dist/*.whl dist/*.tar.gz
+      - name: Create the GitHub release (the four files, the changelog section as notes)
+        # Tags only: a dispatch and the local runner (kit/ci_local.py) skip this step.
+        # --verify-tag refuses to create a tag that was not pushed.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          echo "dry run: would attach these files and the notes above to release ${GITHUB_REF_NAME}"
-          sha256sum dist/*
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "facdrone-data ${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            dist/*.whl dist/*.tar.gz
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 4

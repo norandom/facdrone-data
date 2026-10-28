@@ -1,6 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Marius Ciepluch
-"""Timestamp declarations for intraday sources, applied only at the panel read boundary."""
+"""Timestamp declarations for intraday sources, applied wherever a stored opening is read.
+
+``intraday_prices`` keeps each opening as the provider stamped it, without a zone. FMP stamps
+a bar in its exchange's local time: the US indices and equities and the futures CFDs in New
+York, the provider's declared zone below; a European or Asian cash index in its own exchange's
+(^FTSE in London, ^N225 in Tokyo). So the zone is declared per instrument, on its identity row
+(``intraday_zone``, resolved by ``InstrumentTable.intraday_zones``), and every reader is handed
+it as data: the normalizer's completeness filter, the catalog panel, the market days, the
+freshness reader and the exit bar source. A stamp in a DST fold or gap of its zone names no
+instant: the reader skips and counts it (``SkippedStamp``).
+"""
 
 from __future__ import annotations
 
@@ -12,9 +22,10 @@ from zoneinfo import ZoneInfo
 
 from facdrone_data_types.symbols import Provider
 
-# FMP stores local Eastern bar openings unchanged. The operator measured the
-# 17:00 maintenance gap in winter AND summer. Other registered providers write
-# daily prices/order flow only; they have no declared naive intraday convention.
+# The zone a provider stamps a row in when the row declares none of its own. FMP's US
+# openings are local Eastern: the operator measured the futures' 17:00 maintenance gap in
+# winter AND summer. Other registered providers write daily prices/order flow only; they
+# have no declared naive intraday convention.
 INTRADAY_TIMESTAMP_ZONES = MappingProxyType({Provider.FMP: "America/New_York"})
 
 

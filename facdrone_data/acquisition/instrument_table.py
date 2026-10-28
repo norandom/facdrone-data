@@ -4,6 +4,11 @@
 
 Kinds declare which universes reuse a SERIES; contract tables own economics.
 Task 2.2 will replace the provider dictionaries with this table at their callers.
+
+A row may name the zone its intraday provider stamps the instrument's bar openings in
+(``intraday_zone``, an IANA name): FMP stamps each index in its exchange's local time, the
+nine non-US cash indices included. A row without one reads in its provider's declared zone
+(``intraday_clock.INTRADAY_TIMESTAMP_ZONES``); a row no provider serves intraday names none.
 """
 
 from __future__ import annotations
@@ -13,10 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Literal, Self
+from zoneinfo import ZoneInfo
 
 import yaml
-from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator, model_validator
 
+from facdrone_data.acquisition.intraday_clock import INTRADAY_TIMESTAMP_ZONES
 from facdrone_data_types.enums import AssetClass
 from facdrone_data_types.symbols import CanonicalSymbol, Provider
 
@@ -36,6 +43,7 @@ class InstrumentIdentity:
     providers: Mapping[Provider, str | None]
     intraday: Intraday
     shared_series: bool
+    intraday_zone: str | None = None  # as declared; None reads in the provider's zone
 
     @property
     def asset_class(self) -> AssetClass:
@@ -67,7 +75,20 @@ class _Row(BaseModel):
     settlement_ccy: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
     providers: dict[Provider, Token | None]
     intraday: Intraday
+    intraday_zone: str | None = None
     shared_series: bool = False
+
+    @field_validator("intraday_zone")
+    @classmethod
+    def iana(cls, zone: str | None) -> str | None:
+        if zone is None:
+            return None
+        try:
+            if ZoneInfo(zone).key == zone:
+                return zone
+        except (ValueError, KeyError):  # ZoneInfoNotFoundError is a KeyError
+            pass
+        raise ValueError(f"intraday_zone {zone!r} is not an IANA time zone")
 
     @model_validator(mode="after")
     def complete(self) -> Self:
@@ -86,6 +107,12 @@ class _Row(BaseModel):
             raise ValueError("intraday fmp requires an fmp symbol")
         return self
 
+    @model_validator(mode="after")
+    def zone_needs_bars(self) -> Self:
+        if self.intraday == "unavailable" and self.intraday_zone is not None:
+            raise ValueError("intraday unavailable stamps no bars, so it declares no intraday_zone")
+        return self
+
     def identity(self) -> InstrumentIdentity:
         return InstrumentIdentity(
             canonical=CanonicalSymbol(self.canonical, self.asset_class, self.settlement_ccy),
@@ -93,6 +120,7 @@ class _Row(BaseModel):
             providers=MappingProxyType(dict(self.providers)),
             intraday=self.intraday,
             shared_series=self.shared_series,
+            intraday_zone=self.intraday_zone,
         )
 
 
@@ -177,6 +205,15 @@ class InstrumentTable:
         """The canonical ids whose row declares ``intraday: unavailable``: no provider serves
         their intraday bars, so an intraday scope that names them can only miss."""
         return frozenset(cid for cid, row in self._rows.items() if row.intraday == "unavailable")
+
+    def intraday_zone(self, canonical: CanonicalSymbol | str) -> str | None:
+        """The zone the row's stored intraday openings are stamped in: its declared
+        ``intraday_zone``, else its provider's declared zone; None when no provider serves
+        its intraday bars (``intraday: unavailable``)."""
+        row = self.identity(canonical)
+        if row.intraday == "unavailable":
+            return None
+        return row.intraday_zone or INTRADAY_TIMESTAMP_ZONES[Provider(row.intraday)]
 
     def by_kind(self, kind: InstrumentKind) -> tuple[CanonicalSymbol, ...]:
         return tuple(row.canonical for _, row in sorted(self._rows.items()) if kind in row.kinds)

@@ -131,6 +131,10 @@ def test_incomplete_row_names_file_and_row(tmp_path: Path, missing: str) -> None
         {"shared_series": True},
         {"kinds": ["cfd", "futures"]},
         {"intraday": "yfinance"},
+        {"intraday_zone": "Europe/Atlantis"},
+        {"intraday_zone": "europe/london"},
+        {"intraday_zone": "../etc/passwd"},
+        {"intraday_zone": ""},
     ],
 )
 def test_invalid_declarations_are_refused(tmp_path: Path, changes: dict[str, object]) -> None:
@@ -165,3 +169,27 @@ def test_without_intraday_reads_the_declared_field(tmp_path: Path) -> None:
     _write(tmp_path / "one.yml", [_row(), unserved | {"intraday": "unavailable"}])
     assert InstrumentTable((tmp_path / "one.yml",)).without_intraday() == frozenset({"6E=F"})
     assert InstrumentTable(()).without_intraday() == frozenset()
+
+
+def test_intraday_zone_reads_the_row_else_the_provider_default(tmp_path: Path) -> None:
+    unserved = _row("6E=F") | {"providers": {"fmp": None, "yfinance": "6E=F"}}
+    london = _row("^FTSE") | {"providers": {"fmp": "^FTSE", "yfinance": "^FTSE"}}
+    london |= {"intraday_zone": "Europe/London"}
+    _write(tmp_path / "one.yml", [_row(), london, unserved | {"intraday": "unavailable"}])
+    table = InstrumentTable((tmp_path / "one.yml",))
+    assert table.intraday_zone("^FTSE") == "Europe/London"
+    assert table.intraday_zone("ES=F") == "America/New_York"  # FMP's declared zone
+    assert table.identity("ES=F").intraday_zone is None  # as declared: nothing
+    assert table.intraday_zone("6E=F") is None  # no provider stamps its bars
+    with pytest.raises(InstrumentTableError, match="no identity row"):
+        table.intraday_zone("UNLISTED")
+
+
+def test_a_zone_on_an_unserved_row_is_refused(tmp_path: Path) -> None:
+    unserved = _row("6E=F") | {"providers": {"fmp": None, "yfinance": "6E=F"}}
+    _write(
+        tmp_path / "one.yml",
+        [unserved | {"intraday": "unavailable", "intraday_zone": "Europe/Berlin"}],
+    )
+    with pytest.raises(InstrumentTableError, match=r"(?s)6E=F.*declares no intraday_zone"):
+        InstrumentTable((tmp_path / "one.yml",))

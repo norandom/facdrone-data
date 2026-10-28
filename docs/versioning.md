@@ -24,5 +24,5 @@ A release is a git tag `vMAJOR.MINOR.PATCH`. The release carries the built wheel
 the changelog section as its notes. A consumer pins an exact version. The package is not
 published to a package index (see the README).
 
-The current version is in `pyproject.toml`. The module is below 1.0.0 until the first release
-is tagged, and a minor version may break a name until then.
+The current version is in `pyproject.toml`. The first release is 1.0.0 (2026-10-28); from it
+on, a name that a consumer imports changes only with a major version.

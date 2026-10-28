@@ -12,7 +12,9 @@ Scope resolution is structural: a family with explicit ``scopes`` iterates them
 (FRED series ids, indicator names); a symbol-keyed family iterates the universe and
 resolves each through the registry (an unmapped symbol is skipped and recorded,
 R5.3); a global family runs once. Fail-open: an empty/`[]` provider payload skips
-that scope, persists nothing, and the run continues (R2.4).
+that scope, persists nothing, and the run continues (R2.4). A client that raises
+``ProviderAnsweredEmpty`` says the provider answered with no rows; a scope whose every
+gap was answered that way is ``provider_empty`` (no rows for the window), not an outage.
 
 Depends only on ``domain.ports`` + pipelines primitives — never imports ``shells``
 (an import-linter contract pins ``pipelines ↛ shells``). The quality gate is an
@@ -32,7 +34,7 @@ from sqlalchemy import Date, DateTime
 
 from facdrone_data.acquisition.families.ports import FamilyPort
 from facdrone_data.acquisition.requirement import DataCoverageReport
-from facdrone_data_types.ports import FetchRequest
+from facdrone_data_types.ports import FetchRequest, ProviderAnsweredEmpty
 
 if TYPE_CHECKING:
     from datetime import date, datetime
@@ -69,6 +71,7 @@ class ProviderOutcome(StrEnum):
     PROVIDER_VERIFIED = "provider_verified"
     PARTIAL_PROVIDER_COVERAGE = "partial_provider_coverage"
     ALREADY_LANDED = "already_landed"
+    PROVIDER_EMPTY = "provider_empty"  # the provider answered every gap: no rows for the window
     PROVIDER_UNAVAILABLE = "provider_unavailable"
     QUALITY_REJECTED = "quality_rejected"
     UNMAPPED = "unmapped"
@@ -184,15 +187,12 @@ class FamilyRefresher:
                 out.append(_landed_summary(port.writer, label))  # covered (R7.1)
                 continue
             fetched = inserted = updated = quarantined = 0
-            raw_provider_responses = usable_gap_responses = 0
+            raw_provider_responses = usable_gap_responses = empty_answers = 0
             cursor: date | None = None
             for gap_start, gap_end in gaps:
                 request = FetchRequest(provider_symbol, port.target_table.name, gap_start, gap_end)
-                try:
-                    raw = available_client.fetch(request)
-                except Exception:  # noqa: BLE001 — provider/transport fault (HTTP error,
-                    # missing optional SDK): fail open so one source never aborts the run (R2.4)
-                    raw = pd.DataFrame()
+                raw, answered_empty = _fetch(available_client, request)
+                empty_answers += answered_empty
                 if raw.empty:  # fail-open: provider error/empty payload (R2.4)
                     continue
                 raw_provider_responses += 1
@@ -210,6 +210,7 @@ class FamilyRefresher:
                 usable_gap_responses,
                 raw_provider_responses,
                 len(gaps),
+                empty_answers,
             )
             out.append(
                 FamilySummary(
@@ -217,6 +218,18 @@ class FamilyRefresher:
                 )
             )
         return out
+
+
+def _fetch(client: MarketDataClient, request: FetchRequest) -> tuple[pd.DataFrame, bool]:
+    """One gap's raw frame, and whether the provider answered it with no rows. Any other
+    fault (HTTP error, missing optional SDK) fails open as an empty frame, so one source
+    never aborts the run (R2.4)."""
+    try:
+        return client.fetch(request), False
+    except ProviderAnsweredEmpty:
+        return pd.DataFrame(), True
+    except Exception:  # noqa: BLE001 — provider/transport fault: fail open (R2.4)
+        return pd.DataFrame(), False
 
 
 def _latest(cursor: date | None, port: FamilyPort, frame: pd.DataFrame) -> date | None:
@@ -260,9 +273,16 @@ def _unavailable_summary(
 
 
 def _provider_outcome(
-    usable_gap_responses: int, raw_provider_responses: int, requested_gaps: int
+    usable_gap_responses: int,
+    raw_provider_responses: int,
+    requested_gaps: int,
+    empty_answers: int,
 ) -> ProviderOutcome:
-    """Classify complete coverage by usable gaps while retaining raw-response failures."""
+    """Classify complete coverage by usable gaps while retaining raw-response failures.
+
+    Nothing usable and nothing raw: ``provider_empty`` when the provider answered every
+    gap with no rows (a closed market, a bar not yet printed), else the outage
+    ``provider_unavailable`` (a failed request, or a client that cannot tell)."""
     if not requested_gaps:
         # Nothing was missing, so nothing was asked for. Checked FIRST because the fetch
         # loop never runs here and all three counts stay zero, which used to fall through
@@ -277,4 +297,6 @@ def _provider_outcome(
         return ProviderOutcome.PARTIAL_PROVIDER_COVERAGE
     if raw_provider_responses:
         return ProviderOutcome.QUALITY_REJECTED
+    if empty_answers == requested_gaps:
+        return ProviderOutcome.PROVIDER_EMPTY
     return ProviderOutcome.PROVIDER_UNAVAILABLE

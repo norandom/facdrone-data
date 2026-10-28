@@ -199,12 +199,19 @@ def test_refresher_fails_open_when_a_transport_raises(prices_engine: Engine) -> 
     assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0
 
 
-@pytest.mark.parametrize("fault", [ProviderAnsweredEmpty("no rows"), ConnectionError("down")])
+@pytest.mark.parametrize(
+    ("fault", "outcome"),
+    [
+        (ProviderAnsweredEmpty("no rows"), ProviderOutcome.PROVIDER_EMPTY),
+        (ConnectionError("down"), ProviderOutcome.PROVIDER_UNAVAILABLE),
+    ],
+)
 def test_refresher_falls_open_on_what_a_client_raises(
-    prices_engine: Engine, fault: Exception
+    prices_engine: Engine, fault: Exception, outcome: ProviderOutcome
 ) -> None:
     """A client raises why no rows came back (the FMP price client: an empty answer, a
-    failed request); the refresher lands nothing and runs on (R2.4)."""
+    failed request); the refresher lands nothing, runs on (R2.4) and names it: an empty
+    answer is provider_empty, a failed request the outage provider_unavailable."""
 
     def _raise(req: object) -> pd.DataFrame:
         raise fault
@@ -214,5 +221,5 @@ def test_refresher_falls_open_on_what_a_client_raises(
     inputs = replace(_inputs(prices_engine, (EURUSD,)), clients={Provider.FMP: client})
     (summary,) = FamilyRefresher().run(inputs).summaries  # must not raise
     assert summary.fetched == 0 and summary.inserted == 0
-    assert summary.provider_outcome is ProviderOutcome.PROVIDER_UNAVAILABLE
+    assert summary.provider_outcome is outcome
     assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0

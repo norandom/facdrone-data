@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "facdrone-data"
-version = "0.1.0"
+version = "1.0.0"
 description = "A point-in-time market-data store in PostgreSQL for research and trading systems: acquisition, provider adapters, an evidence ledger, bars, quality and freshness (first consumer: facdrone)"
 requires-python = ">=3.13"
 dependencies = [
-    "facdrone-data-types",
+    "facdrone-data-types==1.0.0",
     "pandas==2.3.3",
     "numpy==2.2.6",
     "sqlalchemy>=2",

@@ -2,10 +2,14 @@
 # Copyright 2026 Marius Ciepluch
 """FMP request wrapper + per-endpoint fetchers (R2.2, R2.4).
 
-The wrapper prepends the ``apikey`` param, normalizes list/dict/string/error payloads, and
-**fails open**: any error returns ``[]`` so one bad family never aborts the download (R2.4).
+``fmp_records`` prepends the ``apikey`` param, normalizes list/dict/string/error payloads,
+and tells an answer from a failure: FMP's records (``[]`` when it answered with none), or
+``FmpRequestError`` for a transport or HTTP fault and an error payload. ``fmp_get``, which
+every family client calls, **fails open** over it: any error returns ``[]`` so one bad
+family never aborts the download (R2.4). The price client reads ``fmp_records`` so the
+refresher can tell "no rows for the window" (``ProviderAnsweredEmpty``) from an outage.
 The live transport takes its timeout and its throttle retries from FMP's row in
-``providers.policy``; a throttle answer still standing after them fails open like any error.
+``providers.policy``; a throttle answer still standing after them is an error like any other.
 
 The HTTP call is an injected ``HttpJson`` transport so the wrapper is pure and
 testable offline; the live transport (``live_http_json``) is wired at the data
@@ -26,6 +30,7 @@ import pandas as pd
 
 from facdrone_data.credentials import redact
 from facdrone_data.providers.policy import POLICY, THROTTLE_STATUSES, Outcome, with_retries
+from facdrone_data_types.ports import ProviderAnsweredEmpty
 from facdrone_data_types.symbols import Provider
 
 if TYPE_CHECKING:
@@ -38,9 +43,48 @@ FMP_BASE = "https://financialmodelingprep.com/stable"
 
 log = logging.getLogger(__name__)
 
-# (url, query params) -> parsed JSON (list/dict/str). May raise; the wrapper
-# catches and fails open.
+# (url, query params) -> parsed JSON (list/dict/str). May raise; ``fmp_records`` turns
+# the fault into ``FmpRequestError`` and ``fmp_get`` fails open on it.
 HttpJson = Callable[[str, Mapping[str, str]], Any]
+
+
+class FmpRequestError(Exception):
+    """FMP did not answer: a transport or HTTP fault, or an error payload. The message
+    is redacted (R4.3) and carries no chained exception, whose text names the key."""
+
+
+def _failed(message: str) -> FmpRequestError:
+    """The failure, logged once where it happened (the callers fail open silently)."""
+    log.warning("%s", message)
+    return FmpRequestError(message)
+
+
+def fmp_records(
+    transport: HttpJson,
+    endpoint: str,
+    params: Mapping[str, str] | None = None,
+    *,
+    api_key: str,
+    base: str = FMP_BASE,
+) -> list[dict[str, Any]]:
+    """GET an FMP endpoint: its records, ``[]`` when FMP answered with none, or
+    ``FmpRequestError`` when it did not answer.
+
+    A list payload is returned as-is; a plain dict is wrapped in a one-element list; a
+    dict carrying an ``Error`` or a bare string is an error; anything else yields ``[]``."""
+    query = {"apikey": api_key, **(params or {})}
+    try:
+        data = transport(f"{base}{endpoint}", query)
+    except Exception as exc:  # noqa: BLE001 — every transport fault becomes the typed error
+        # Transport errors carry the request URL, key included: redact before raising (R4.3).
+        raise _failed(f"FMP request failed {endpoint}: {redact(str(exc), (api_key,))}") from None
+    if isinstance(data, dict) and "Error" in str(data):
+        raise _failed(f"FMP error {endpoint}: {data}")
+    if isinstance(data, str):
+        raise _failed(f"FMP returned string {endpoint}: {data[:100]}")
+    if isinstance(data, list):
+        return data
+    return [data] if isinstance(data, dict) else []
 
 
 def fmp_get(
@@ -51,27 +95,11 @@ def fmp_get(
     api_key: str,
     base: str = FMP_BASE,
 ) -> list[dict[str, Any]]:
-    """GET an FMP endpoint, returning a list of records or ``[]`` on any error.
-
-    A list payload is returned as-is; a dict carrying an
-    ``Error`` or a bare string is logged and dropped; a plain dict is wrapped in a
-    one-element list; anything else (or an exception) yields ``[]`` (fail-open)."""
-    query = {"apikey": api_key, **(params or {})}
+    """``fmp_records``, failing open: a failed request is logged and yields ``[]`` (R2.4)."""
     try:
-        data = transport(f"{base}{endpoint}", query)
-    except Exception as exc:  # noqa: BLE001 — fail-open is the contract (R2.4)
-        # Transport errors carry the request URL, key included: redact before logging (R4.3).
-        log.warning("FMP request failed %s: %s", endpoint, redact(str(exc), (api_key,)))
+        return fmp_records(transport, endpoint, params, api_key=api_key, base=base)
+    except FmpRequestError:
         return []
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and "Error" in str(data):
-        log.warning("FMP error %s: %s", endpoint, data)
-        return []
-    if isinstance(data, str):
-        log.warning("FMP returned string %s: %s", endpoint, data[:100])
-        return []
-    return [data] if isinstance(data, dict) else []
 
 
 # Calendar days per intraday request so that bars stay below FMP's ~3,000-bar cap:
@@ -132,8 +160,10 @@ class FmpPriceClient:
     """``MarketDataClient`` for the FMP price endpoints (daily / intraday / ETF).
 
     Returns the raw FMP records as a DataFrame; the per-family normalizer shapes
-    them. A non-price FMP dataset returns empty → the refresher fails open and
-    skips it (the full per-endpoint transport layer is wired the same way)."""
+    them. When no rows came back it says why: ``FmpRequestError`` when a request
+    failed, ``ProviderAnsweredEmpty`` when FMP answered every request with none. A
+    non-price FMP dataset returns empty → the refresher fails open and skips it (the
+    full per-endpoint transport layer is wired the same way)."""
 
     transport: HttpJson
     api_key: str
@@ -153,32 +183,44 @@ class FmpPriceClient:
             # multi-year request for a new series lands only its last weeks (measured
             # 2026-09-24: ESUSD 15min 2024-01-01..2026-09-23 returned 2026-08-10 onward). So
             # the range is split into windows that stay below the cap at the bar interval.
-            frames = []
-            for start, end in chunked_date_ranges(
+            # A failed window does not discard the others' bars (R2.4).
+            windows = chunked_date_ranges(
                 req.start, req.end, days=_INTRADAY_WINDOW_DAYS[req.interval]
-            ):
-                window = {**params, "from": start.isoformat(), "to": end.isoformat()}
-                frames.append(
-                    pd.DataFrame(
-                        fmp_get(
-                            self.transport,
-                            f"/historical-chart/{req.interval}",
-                            window,
-                            api_key=self.api_key,
-                        )
-                    )
-                )
-            nonempty = [frame for frame in frames if not frame.empty]
-            if not nonempty:
-                return pd.DataFrame()
-            joined = pd.concat(nonempty, ignore_index=True).drop_duplicates(subset=["date"])
+            )
+            records, error = self._windows(f"/historical-chart/{req.interval}", params, windows)
+            joined = _answered(records, error).drop_duplicates(subset=["date"])
             return joined.rename(columns={"date": "datetime"})
         if req.dataset in ("daily_prices", "etf_prices"):
-            records = fmp_get(
+            records = fmp_records(
                 self.transport, "/historical-price-eod/full", params, api_key=self.api_key
             )
-            return pd.DataFrame(records)
+            return _answered(records, None)
         return pd.DataFrame()  # not a price dataset → fail-open skip
+
+    def _windows(
+        self, endpoint: str, params: Mapping[str, str], windows: list[tuple[date, date]]
+    ) -> tuple[list[dict[str, Any]], FmpRequestError | None]:
+        """Every window's records, and the last failure among them (logged where it
+        happened, not raised here)."""
+        records: list[dict[str, Any]] = []
+        error: FmpRequestError | None = None
+        for start, end in windows:
+            window = {**params, "from": start.isoformat(), "to": end.isoformat()}
+            try:
+                records += fmp_records(self.transport, endpoint, window, api_key=self.api_key)
+            except FmpRequestError as failed:
+                error = failed
+        return records, error
 
     def datasets(self) -> tuple[str, ...]:
         return ("daily_prices", "intraday_prices", "etf_prices")
+
+
+def _answered(records: list[dict[str, Any]], error: FmpRequestError | None) -> pd.DataFrame:
+    """The records as a frame; with none, the failure if a request failed, else the answer
+    that FMP has no rows for the window."""
+    if records:
+        return pd.DataFrame(records)
+    if error is not None:
+        raise error
+    raise ProviderAnsweredEmpty("FMP answered with no rows for the window")

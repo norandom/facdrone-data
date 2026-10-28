@@ -6,6 +6,7 @@ normalizer contract (raw payload → table columns), R2.2, R2.4, R6.1."""
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 from unittest.mock import Mock, call, patch
@@ -22,14 +23,16 @@ from facdrone_data.acquisition.families.normalizers._base import (
 from facdrone_data.acquisition.schema import DAILY_PRICES, FAMA_FRENCH_FACTORS
 from facdrone_data.providers.fmp_endpoints import (
     FmpPriceClient,
+    FmpRequestError,
     chunked_date_ranges,
     fmp_get,
+    fmp_records,
     live_http_json,
 )
 from facdrone_data.providers.policy import TIMEOUT_SECONDS
 from facdrone_data.testing import API_KEY
 from facdrone_data_types.enums import AssetClass
-from facdrone_data_types.ports import FetchRequest
+from facdrone_data_types.ports import FetchRequest, ProviderAnsweredEmpty
 from facdrone_data_types.symbols import CanonicalSymbol
 
 
@@ -105,6 +108,66 @@ def test_fmp_get_fails_open_on_error_dict_string_and_exception() -> None:
         raise ConnectionError("network down")
 
     assert fmp_get(_boom, "/x", api_key=API_KEY) == []  # no raise — fail-open (R2.4)
+
+
+def test_fmp_records_tells_an_empty_answer_from_a_failed_request() -> None:
+    """The strict wrapper under ``fmp_get``: FMP answering with no rows is ``[]``; a
+    transport fault, an error payload and a bare string are ``FmpRequestError``."""
+    assert fmp_records(_transport([]), "/x", api_key=API_KEY) == []
+    assert fmp_records(_transport({"a": 1}), "/x", api_key=API_KEY) == [{"a": 1}]
+    for payload in ({"Error Message": "limit"}, "rate limited"):
+        with pytest.raises(FmpRequestError, match="/x"):
+            fmp_records(_transport(payload), "/x", api_key=API_KEY)
+
+    def _boom(url: str, params: Mapping[str, str]) -> Any:
+        raise ConnectionError("network down")
+
+    with pytest.raises(FmpRequestError, match="network down"):
+        fmp_records(_boom, "/x", api_key=API_KEY)
+
+
+def _price_client(answers: list[Any]) -> FmpPriceClient:
+    """An FMP price client whose transport gives one answer per request, in order; an
+    exception in the list is raised as that request's transport fault."""
+    queue = list(answers)
+
+    def _answer(url: str, params: Mapping[str, str]) -> Any:
+        del url, params
+        answer = queue.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return FmpPriceClient(_answer, API_KEY)
+
+
+DAILY = FetchRequest("GCUSD", "daily_prices", date(2026, 10, 26), date(2026, 10, 27))
+INTRADAY = FetchRequest("ESUSD", "intraday_prices", date(2024, 1, 1), date(2024, 3, 31))
+BAR = {"date": "2024-01-02 18:00:00", "close": 1.0}
+
+
+def test_the_price_client_raises_why_no_rows_came_back() -> None:
+    """FMP answering every request with nothing is ``ProviderAnsweredEmpty``; a failed
+    request with nothing landed is ``FmpRequestError`` (the refresher tells them apart)."""
+    with pytest.raises(ProviderAnsweredEmpty):
+        _price_client([[]]).fetch(DAILY)
+    with pytest.raises(FmpRequestError):
+        _price_client([ConnectionError("down")]).fetch(DAILY)
+    with pytest.raises(ProviderAnsweredEmpty):
+        _price_client([[], [], [], []]).fetch(INTRADAY)
+    with pytest.raises(FmpRequestError):
+        _price_client([[], ConnectionError("down"), [], []]).fetch(INTRADAY)
+
+
+def test_a_failed_intraday_window_keeps_the_other_windows_bars() -> None:
+    frame = _price_client([[BAR], ConnectionError("down"), {"Error Message": "x"}, []]).fetch(
+        INTRADAY
+    )
+    assert frame["datetime"].tolist() == ["2024-01-02 18:00:00"]
+    assert _price_client([[{"date": "2026-10-26", "close": 1.0}]]).fetch(DAILY)[
+        "close"
+    ].tolist() == [1.0]
+    assert _price_client([]).fetch(replace(DAILY, dataset="fred_series")).empty  # not a price set
 
 
 def test_fmp_get_injects_the_api_key_and_endpoint_params() -> None:

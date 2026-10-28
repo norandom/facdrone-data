@@ -30,7 +30,7 @@ from facdrone_data.quality.ensemble import EnsembleValidator
 from facdrone_data.testing import EURUSD
 from facdrone_data.testing.fakes import FakeMarketDataClient
 from facdrone_data_types.enums import AssetClass
-from facdrone_data_types.ports import FetchRequest, SymbolRegistry
+from facdrone_data_types.ports import FetchRequest, ProviderAnsweredEmpty, SymbolRegistry
 from facdrone_data_types.symbols import CanonicalSymbol, Provider
 
 # The family mappers over an empty identity table: these tests inject their own mappers.
@@ -196,4 +196,23 @@ def test_refresher_fails_open_when_a_transport_raises(prices_engine: Engine) -> 
     )
     report = FamilyRefresher().run(inputs)  # must not raise
     assert report.summaries[0].fetched == 0
+    assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0
+
+
+@pytest.mark.parametrize("fault", [ProviderAnsweredEmpty("no rows"), ConnectionError("down")])
+def test_refresher_falls_open_on_what_a_client_raises(
+    prices_engine: Engine, fault: Exception
+) -> None:
+    """A client raises why no rows came back (the FMP price client: an empty answer, a
+    failed request); the refresher lands nothing and runs on (R2.4)."""
+
+    def _raise(req: object) -> pd.DataFrame:
+        raise fault
+
+    client = FakeMarketDataClient(provider=Provider.FMP)
+    client.fetch = _raise  # type: ignore[method-assign]
+    inputs = replace(_inputs(prices_engine, (EURUSD,)), clients={Provider.FMP: client})
+    (summary,) = FamilyRefresher().run(inputs).summaries  # must not raise
+    assert summary.fetched == 0 and summary.inserted == 0
+    assert summary.provider_outcome is ProviderOutcome.PROVIDER_UNAVAILABLE
     assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0

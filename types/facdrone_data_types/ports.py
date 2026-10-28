@@ -46,12 +46,20 @@ class FetchRequest:
             raise ValueError(f"unsupported bar interval: {self.interval!r}")
 
 
+class ProviderAnsweredEmpty(Exception):
+    """The provider answered the request and had no rows for its window.
+
+    A ``MarketDataClient`` that can tell an answer from a failure raises it instead of
+    returning an empty frame; an empty frame stays "no usable answer" (fail-open, R2.4)."""
+
+
 @runtime_checkable
 class MarketDataClient(Protocol):
     """Injected port for one external data provider (R1.1, R6.1).
 
     The caller schema-validates the returned frame; adapters declare which
-    dataset families they serve so a family maps to exactly one adapter.
+    dataset families they serve so a family maps to exactly one adapter. A fetch
+    may raise ``ProviderAnsweredEmpty`` when the provider answered with no rows.
     """
 
     @property

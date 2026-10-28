@@ -12,7 +12,7 @@ import pytest
 
 from facdrone_data.acquisition.families.credentials import ProviderCredentials
 from facdrone_data.credentials import RedactingFilter, install_redaction, redact
-from facdrone_data.providers.fmp_endpoints import fmp_get
+from facdrone_data.providers.fmp_endpoints import FmpRequestError, fmp_get, fmp_records
 
 _KEY = "fmpkey-0123456789abcdef"  # noqa: S105 — synthetic test fixture, not a real key
 _URL = (
@@ -41,6 +41,14 @@ def test_the_provider_boundary_logs_no_key(caplog: pytest.LogCaptureFixture) -> 
     assert caplog.records, "the failed request is reported"
     for record in caplog.records:
         assert _KEY not in record.getMessage()
+
+
+def test_the_typed_request_error_names_no_key() -> None:
+    """The strict wrapper's error is redacted and chains nothing whose text names the key."""
+    with pytest.raises(FmpRequestError) as caught:
+        fmp_records(_failing_transport, "/historical-price-eod/full", api_key=_KEY)
+    assert _KEY not in str(caught.value) and "401" in str(caught.value)
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
 
 
 def test_the_logging_filter_redacts_messages_arguments_and_exception_text() -> None:

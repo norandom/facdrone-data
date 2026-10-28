@@ -130,6 +130,7 @@ def test_incomplete_row_names_file_and_row(tmp_path: Path, missing: str) -> None
         {"asset_class": "unknown"},
         {"shared_series": True},
         {"kinds": ["cfd", "futures"]},
+        {"intraday": "yfinance"},
     ],
 )
 def test_invalid_declarations_are_refused(tmp_path: Path, changes: dict[str, object]) -> None:
@@ -157,3 +158,10 @@ def test_coverage_partitions_universe_and_rows_are_frozen() -> None:
         row.intraday = "unavailable"  # type: ignore[misc]
     with pytest.raises(TypeError):
         row.providers[Provider.FMP] = "wrong"  # type: ignore[index]
+
+
+def test_without_intraday_reads_the_declared_field(tmp_path: Path) -> None:
+    unserved = _row("6E=F") | {"providers": {"fmp": None, "yfinance": "6E=F"}}
+    _write(tmp_path / "one.yml", [_row(), unserved | {"intraday": "unavailable"}])
+    assert InstrumentTable((tmp_path / "one.yml",)).without_intraday() == frozenset({"6E=F"})
+    assert InstrumentTable(()).without_intraday() == frozenset()

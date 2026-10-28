@@ -173,6 +173,11 @@ class InstrumentTable:
                 f"no identity row for {provider.value} symbol {symbol!r}"
             ) from exc
 
+    def without_intraday(self) -> frozenset[str]:
+        """The canonical ids whose row declares ``intraday: unavailable``: no provider serves
+        their intraday bars, so an intraday scope that names them can only miss."""
+        return frozenset(cid for cid, row in self._rows.items() if row.intraday == "unavailable")
+
     def by_kind(self, kind: InstrumentKind) -> tuple[CanonicalSymbol, ...]:
         return tuple(row.canonical for _, row in sorted(self._rows.items()) if kind in row.kinds)
 

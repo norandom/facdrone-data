@@ -183,6 +183,13 @@ def test_intraday_zone_reads_the_row_else_the_provider_default(tmp_path: Path) -
     assert table.intraday_zone("6E=F") is None  # no provider stamps its bars
     with pytest.raises(InstrumentTableError, match="no identity row"):
         table.intraday_zone("UNLISTED")
+    zones = table.intraday_zones()  # the resolver the readers of a stored stamp take
+    assert zones.declared == {"^FTSE": "Europe/London"}
+    assert [zones.of(s) for s in ("^FTSE", "ES=F", "UNLISTED")] == [
+        "Europe/London",
+        "America/New_York",
+        "America/New_York",
+    ]
 
 
 def test_a_zone_on_an_unserved_row_is_refused(tmp_path: Path) -> None:

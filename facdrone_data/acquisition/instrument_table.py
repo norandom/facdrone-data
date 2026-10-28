@@ -8,7 +8,7 @@ Task 2.2 will replace the provider dictionaries with this table at their callers
 A row may name the zone its intraday provider stamps the instrument's bar openings in
 (``intraday_zone``, an IANA name): FMP stamps each index in its exchange's local time, the
 nine non-US cash indices included. A row without one reads in its provider's declared zone
-(``intraday_clock.INTRADAY_TIMESTAMP_ZONES``); a row no provider serves intraday names none.
+(``intraday_clock.provider_zone``); a row no provider serves intraday names none.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 import yaml
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator, model_validator
 
-from facdrone_data.acquisition.intraday_clock import INTRADAY_TIMESTAMP_ZONES
+from facdrone_data.acquisition.intraday_clock import IntradayZones, provider_zone
 from facdrone_data_types.enums import AssetClass
 from facdrone_data_types.symbols import CanonicalSymbol, Provider
 
@@ -213,7 +213,13 @@ class InstrumentTable:
         row = self.identity(canonical)
         if row.intraday == "unavailable":
             return None
-        return row.intraday_zone or INTRADAY_TIMESTAMP_ZONES[Provider(row.intraday)]
+        return row.intraday_zone or provider_zone(Provider(row.intraday))
+
+    def intraday_zones(self) -> IntradayZones:
+        """Every row's stamp zone as one resolver: the rows that declare their own over the
+        zone FMP, the one intraday provider, declares (``intraday: fmp``)."""
+        declared = {cid: row.intraday_zone for cid, row in self._rows.items() if row.intraday_zone}
+        return IntradayZones(provider_zone(Provider.FMP), MappingProxyType(declared))
 
     def by_kind(self, kind: InstrumentKind) -> tuple[CanonicalSymbol, ...]:
         return tuple(row.canonical for _, row in sorted(self._rows.items()) if kind in row.kinds)

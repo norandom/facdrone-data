@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
@@ -25,17 +26,43 @@ class IntradayFoldError(IntradayTimestampError):
     """A naive opening falls in a DST fold or gap of its declared zone."""
 
 
-def intraday_timestamp(moment: datetime, provider: Provider) -> datetime:
-    """Localize a naive provider opening once; aware input keeps its actual instant.
+def provider_zone(provider: Provider) -> str:
+    """The zone a provider stamps a row in when the row declares none of its own."""
+    zone = INTRADAY_TIMESTAMP_ZONES.get(provider)
+    if zone is None:
+        raise IntradayTimestampError(f"undeclared intraday timestamp zone: {provider}")
+    return zone
+
+
+@dataclass(frozen=True)
+class IntradayZones:
+    """The stamp zone of each symbol's stored openings: the symbol's declared zone (the
+    catalog's ``intraday_zone``), else the provider's ``default``. Data a root reads from
+    its identity table and hands every reader of a stored stamp."""
+
+    default: str
+    declared: Mapping[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def provider(cls, provider: Provider) -> IntradayZones:
+        """Every symbol in the provider's declared zone: what a reader without a table knows."""
+        return cls(provider_zone(provider))
+
+    def of(self, symbol: str) -> str:
+        return self.declared.get(symbol, self.default)
+
+    def __hash__(self) -> int:  # requests and run inputs that carry it stay hashable
+        return hash((self.default, tuple(sorted(self.declared.items()))))
+
+
+def intraday_timestamp(moment: datetime, zone: str) -> datetime:
+    """Localize a naive opening stamped in ``zone`` once; aware input keeps its instant.
 
     DST folds and gaps cannot be inferred from a timezone-free stored value. Refuse
     them rather than silently guessing a fold or moving a nonexistent bar forward.
     """
     if moment.utcoffset() is not None:
         return moment.astimezone(UTC)
-    zone = INTRADAY_TIMESTAMP_ZONES.get(provider)
-    if zone is None:
-        raise IntradayTimestampError(f"undeclared intraday timestamp zone: {provider}")
     local = moment.replace(tzinfo=ZoneInfo(zone))
     instant = local.astimezone(UTC)
     if (
@@ -66,15 +93,15 @@ class SkippedStamp:
         return any(start <= t and t + interval <= end for t in (self.earliest, self.latest))
 
 
-def intraday_or_skip(moment: datetime, provider: Provider) -> datetime | SkippedStamp:
+def intraday_or_skip(moment: datetime, zone: str) -> datetime | SkippedStamp:
     """The intraday load rule: localize as ``intraday_timestamp`` does, but a fold or
-    gap stamp becomes a ``SkippedStamp`` for the caller to drop and count, never a bar
-    at a guessed instant. An undeclared provider still refuses."""
+    gap stamp of ``zone`` becomes a ``SkippedStamp`` for the caller to drop and count,
+    never a bar at a guessed instant."""
     try:
-        return intraday_timestamp(moment, provider)
+        return intraday_timestamp(moment, zone)
     except IntradayFoldError:
-        zone = ZoneInfo(INTRADAY_TIMESTAMP_ZONES[provider])
+        local = ZoneInfo(zone)
         earliest, latest = sorted(
-            moment.replace(tzinfo=zone, fold=fold).astimezone(UTC) for fold in (0, 1)
+            moment.replace(tzinfo=local, fold=fold).astimezone(UTC) for fold in (0, 1)
         )
         return SkippedStamp(moment, earliest, latest)

@@ -29,7 +29,7 @@ from facdrone_data.acquisition.families.normalizers._base import (
 )
 from facdrone_data.acquisition.families.ports import FamilyPort
 from facdrone_data.acquisition.families.symbol_mapping import ProviderSymbols
-from facdrone_data.acquisition.intraday_clock import INTRADAY_TIMESTAMP_ZONES, intraday_or_skip
+from facdrone_data.acquisition.intraday_clock import intraday_or_skip, provider_zone
 from facdrone_data.acquisition.merge import UpsertPanel
 from facdrone_data.acquisition.schema import DAILY_PRICES, INTRADAY_PRICES
 from facdrone_data_types.symbols import Provider
@@ -84,7 +84,7 @@ class IntradayPricesNormalizer:
     """FMP intraday OHLCV → ``intraday_prices`` (datetime kept, not truncated)."""
 
     interval: str = "15min"
-    timestamp_zone: ClassVar[str] = INTRADAY_TIMESTAMP_ZONES[Provider.FMP]
+    timestamp_zone: ClassVar[str] = provider_zone(Provider.FMP)
 
     def normalize(
         self, raw: pd.DataFrame, *, symbol: CanonicalSymbol | None, as_of: datetime
@@ -97,7 +97,8 @@ class IntradayPricesNormalizer:
         # Stored FMP openings stay local; only the completion comparison uses UTC.
         interval = timedelta(minutes=60 if self.interval == "1hour" else int(self.interval[:-3]))
         at = as_of.replace(tzinfo=UTC) if as_of.tzinfo is None else as_of.astimezone(UTC)
-        openings = [intraday_or_skip(ts.to_pydatetime(), Provider.FMP) for ts in out["datetime"]]
+        zone = self.timestamp_zone
+        openings = [intraday_or_skip(ts.to_pydatetime(), zone) for ts in out["datetime"]]
         out = out.loc[[isinstance(ts, datetime) and ts + interval <= at for ts in openings]].copy()
         out["interval"] = self.interval
         out["volume"] = _int_volume(out["volume"])

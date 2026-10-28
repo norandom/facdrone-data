@@ -174,6 +174,7 @@ class FamilyRefresher:
 
     def _refresh_family(self, port: FamilyPort, inputs: DownloadInputs) -> list[FamilySummary]:
         client = inputs.clients.get(port.provider)
+        normalizer = port.normalizer_for(inputs.symbols)
         out: list[FamilySummary] = []
         for canonical, provider_symbol, cursor_scope, mapped in self._scopes(port, inputs):
             label = cursor_scope or provider_symbol or "global"
@@ -196,7 +197,7 @@ class FamilyRefresher:
                 if raw.empty:  # fail-open: provider error/empty payload (R2.4)
                     continue
                 raw_provider_responses += 1
-                normalized = port.normalizer.normalize(raw, symbol=canonical, as_of=inputs.as_of)
+                normalized = normalizer.normalize(raw, symbol=canonical, as_of=inputs.as_of)
                 gated = self.gate(normalized, port, inputs, canonical)
                 quarantined += len(normalized) - len(gated)  # the gate only ever drops rows
                 if gated.empty:

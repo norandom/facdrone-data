@@ -109,3 +109,11 @@ class FamilyPort:
     # The yfinance fallback's mapper returns the symbol only when FMP cannot map it,
     # which realises the FMP-primary / yfinance-fallback precedence (D8).
     symbol_mapper: Callable[[ProviderSymbols, str], str | None] | None = None
+    # A normalizer that reads the run's identity table (the intraday port judges a bar's
+    # completeness in its symbol's stamp zone) is bound from the run's ``ProviderSymbols``,
+    # as ``symbol_mapper`` is called with them. ``None``: ``normalizer`` reads no table.
+    bind_normalizer: Callable[[ProviderSymbols], Normalizer] | None = None
+
+    def normalizer_for(self, symbols: ProviderSymbols) -> Normalizer:
+        """The normalizer this run's scopes go through."""
+        return self.normalizer if self.bind_normalizer is None else self.bind_normalizer(symbols)

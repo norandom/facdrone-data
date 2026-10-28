@@ -7,12 +7,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, call, patch
 
 import pandas as pd
 import pytest
+import yaml
 
 from facdrone_data.acquisition.families.normalizers._base import (
     coerce_date,
@@ -20,6 +22,8 @@ from facdrone_data.acquisition.families.normalizers._base import (
     project_to_table,
     stamp_updated_at,
 )
+from facdrone_data.acquisition.families.symbol_mapping import ProviderSymbols
+from facdrone_data.acquisition.instrument_table import InstrumentTable
 from facdrone_data.acquisition.schema import DAILY_PRICES, FAMA_FRENCH_FACTORS
 from facdrone_data.providers.fmp_endpoints import (
     FmpPriceClient,
@@ -396,3 +400,81 @@ def test_an_intraday_bar_with_a_zero_close_is_dropped_too() -> None:
     )
     assert len(out) == 2
     assert (out["close"] > 0).all()
+
+
+_FTSE = CanonicalSymbol("^FTSE", AssetClass.INDICES, "GBP")
+_N225 = CanonicalSymbol("^N225", AssetClass.INDICES, "JPY")
+_GSPC = CanonicalSymbol("^GSPC", AssetClass.INDICES, "USD")
+
+
+def _index_table(path: Path) -> InstrumentTable:
+    rows = [
+        {
+            "canonical": symbol,
+            "kind": "cfd",
+            "asset_class": "indices",
+            "settlement_ccy": ccy,
+            "providers": {"fmp": symbol, "yfinance": symbol},
+            "intraday": "fmp",
+        }
+        | ({"intraday_zone": zone} if zone else {})
+        for symbol, ccy, zone in (
+            ("^FTSE", "GBP", "Europe/London"),
+            ("^N225", "JPY", "Asia/Tokyo"),
+            ("^GSPC", "USD", None),
+        )
+    ]
+    path.write_text(yaml.safe_dump(rows, sort_keys=False), encoding="utf-8")
+    return InstrumentTable((path,))
+
+
+def _bars(day: str, *openings: str) -> pd.DataFrame:
+    n = len(openings)
+    return pd.DataFrame(
+        {
+            "datetime": [f"{day} {at}:00" for at in openings],
+            "open": [100.0] * n,
+            "high": [101.0] * n,
+            "low": [99.0] * n,
+            "close": [100.5] * n,
+            "volume": [10] * n,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("canonical", "openings", "as_of", "landed"),
+    [
+        # 08:00-08:45 London (GMT on 2026-10-27) completes by 09:00 UTC; read in New York the
+        # same stamps open at 13:00 UTC, so the NY-only port dropped all four as incomplete
+        (_FTSE, ("08:00", "08:15", "08:30", "08:45"), datetime(2026, 10, 27, 9, 0), 4),
+        # 09:00 Tokyo is 00:00 UTC: complete at 00:15 UTC, fourteen hours before New York's
+        (_N225, ("09:00", "09:15"), datetime(2026, 10, 27, 0, 15, tzinfo=UTC), 1),
+        # an undeclared row keeps FMP's declared zone: 09:30 New York (EDT) is 13:30 UTC
+        (_GSPC, ("09:30", "09:45"), datetime(2026, 10, 27, 13, 50, tzinfo=UTC), 1),
+    ],
+)
+def test_an_intraday_bar_is_complete_in_its_symbols_stamp_zone(
+    tmp_path: Path,
+    canonical: CanonicalSymbol,
+    openings: tuple[str, ...],
+    as_of: datetime,
+    landed: int,
+) -> None:
+    from facdrone_data.acquisition.families.normalizers.prices import (
+        IntradayPricesNormalizer,
+        price_families,
+    )
+
+    table = _index_table(tmp_path / "indices.yml")
+    port = next(p for p in price_families() if p.writer == "refresh_fmp_intraday")
+    normalizer = port.normalizer_for(ProviderSymbols(table))
+    assert normalizer == IntradayPricesNormalizer(zones=table.intraday_zones())
+    out = normalizer.normalize(_bars("2026-10-27", *openings), symbol=canonical, as_of=as_of)
+    assert len(out) == landed
+    assert list(out["datetime"]) == [pd.Timestamp(f"2026-10-27 {at}") for at in openings[:landed]]
+    # without the table every stamp reads in New York
+    unbound = IntradayPricesNormalizer().normalize(
+        _bars("2026-10-27", *openings), symbol=canonical, as_of=as_of
+    )
+    assert len(unbound) == (landed if canonical is _GSPC else 0)

@@ -15,9 +15,9 @@ an FMP-covered symbol (R4.4).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ from facdrone_data.acquisition.families.normalizers._base import (
 )
 from facdrone_data.acquisition.families.ports import FamilyPort
 from facdrone_data.acquisition.families.symbol_mapping import ProviderSymbols
-from facdrone_data.acquisition.intraday_clock import intraday_or_skip, provider_zone
+from facdrone_data.acquisition.intraday_clock import IntradayZones, intraday_or_skip
 from facdrone_data.acquisition.merge import UpsertPanel
 from facdrone_data.acquisition.schema import DAILY_PRICES, INTRADAY_PRICES
 from facdrone_data_types.symbols import Provider
@@ -79,12 +79,26 @@ class DailyPricesNormalizer:
         return project_to_table(_drop_zero_close(cleaned), DAILY_PRICES)
 
 
+def _fmp_zones() -> IntradayZones:
+    return IntradayZones.provider(Provider.FMP)
+
+
 @dataclass(frozen=True)
 class IntradayPricesNormalizer:
-    """FMP intraday OHLCV → ``intraday_prices`` (datetime kept, not truncated)."""
+    """FMP intraday OHLCV → ``intraday_prices`` (datetime kept, not truncated).
+
+    A bar lands once complete: its opening, read in its symbol's stamp zone, plus the
+    interval is no later than the as-of. FMP stamps each index in its exchange's time, so
+    the port binds ``zones`` from the run's identity table (``over``); the default reads
+    every symbol in FMP's declared zone, what a caller without a table knows."""
 
     interval: str = "15min"
-    timestamp_zone: ClassVar[str] = provider_zone(Provider.FMP)
+    zones: IntradayZones = field(default_factory=_fmp_zones)
+
+    @classmethod
+    def over(cls, symbols: ProviderSymbols) -> IntradayPricesNormalizer:
+        """The normalizer reading each symbol's stamp zone from the run's identity table."""
+        return cls(zones=symbols.identities.intraday_zones())
 
     def normalize(
         self, raw: pd.DataFrame, *, symbol: CanonicalSymbol | None, as_of: datetime
@@ -97,7 +111,7 @@ class IntradayPricesNormalizer:
         # Stored FMP openings stay local; only the completion comparison uses UTC.
         interval = timedelta(minutes=60 if self.interval == "1hour" else int(self.interval[:-3]))
         at = as_of.replace(tzinfo=UTC) if as_of.tzinfo is None else as_of.astimezone(UTC)
-        zone = self.timestamp_zone
+        zone = self.zones.of(symbol.canonical_id)
         openings = [intraday_or_skip(ts.to_pydatetime(), zone) for ts in out["datetime"]]
         out = out.loc[[isinstance(ts, datetime) and ts + interval <= at for ts in openings]].copy()
         out["interval"] = self.interval
@@ -141,6 +155,7 @@ def price_families() -> list[FamilyPort]:
             availability_column="datetime",
             quality_policy_default="quarantine",  # the door: QuarantineUnmeasurable at the root
             symbol_mapper=ProviderSymbols.fmp_price,
+            bind_normalizer=IntradayPricesNormalizer.over,
         ),
         FamilyPort(
             writer="refresh_daily_prices",

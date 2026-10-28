@@ -223,3 +223,26 @@ def test_refresher_falls_open_on_what_a_client_raises(
     assert summary.fetched == 0 and summary.inserted == 0
     assert summary.provider_outcome is outcome
     assert len(pd.read_sql(select(DAILY_PRICES), prices_engine)) == 0
+
+
+class _UnboundNormalizer:
+    """A port's static normalizer that the bound one must replace."""
+
+    def normalize(
+        self, raw: pd.DataFrame, *, symbol: CanonicalSymbol | None, as_of: datetime
+    ) -> pd.DataFrame:
+        raise AssertionError("a port that binds its normalizer must not use the static one")
+
+
+def test_a_port_binds_its_normalizer_from_the_runs_identity_table(prices_engine: Engine) -> None:
+    bound: list[ProviderSymbols] = []
+
+    def bind(symbols: ProviderSymbols) -> Normalizer:
+        bound.append(symbols)
+        return cast(Normalizer, _PricesNormalizer())
+
+    port = replace(_port(), normalizer=cast(Normalizer, _UnboundNormalizer()), bind_normalizer=bind)
+    inputs = replace(_inputs(prices_engine, (EURUSD,)), families=(port,))
+    summary = FamilyRefresher().run(inputs).summaries[0]
+    assert bound == [MAPPERS]  # once per run, with the run's mappers
+    assert summary.inserted == 5

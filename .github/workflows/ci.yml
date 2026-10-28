@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Marius Ciepluch
 #
-# The module's CI (facdrone-data-manager 3.6, requirements 7.1 and 7.4). The file sits under
-# packages/facdrone-data/.github/ in the workspace, where GitHub does not read it; it becomes
-# active when the extraction (step (d)) moves this directory to the repository root. Every
-# command runs from the repository root, which is the module directory today, so
-# `scripts/gates.sh unit data` in the workspace runs the same gates.
+# The module's CI (facdrone-data-manager 3.6, requirements 7.1 and 7.4). Every command runs
+# from the repository root; the install is `uv sync --frozen` against uv.lock.
 #
 # Two jobs, both within `timeout-minutes: 15` (7.4): `static` (lint, types, the module's
 # gates) and `tests` (the suite on an embedded PostgreSQL that the module's own test plugin
@@ -31,8 +28,6 @@ env:
   UV_VERSION: "0.12.23"
   GITLEAKS_VERSION: "8.30.1"
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-  # The extras the suite and mypy need; the tools come from .github/ci-requirements.txt.
-  EXTRAS: "testing,kedro,fmp,dukascopy"
 
 jobs:
   static:
@@ -51,18 +46,16 @@ jobs:
           python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            types/pyproject.toml
-            .github/ci-requirements.txt
+            uv.lock
       - name: Install the module, its extras and the CI tools
         # The environment lives outside the checkout, so the secret scan and the literal
         # scan read only the repository's files.
         run: |
-          uv venv "$RUNNER_TEMP/venv" --python 3.13
+          echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --no-sources \
-            -e ./types -e ".[$EXTRAS]" -r .github/ci-requirements.txt
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/venv" uv sync --frozen --python 3.13 \
+            --group dev --extra testing --extra kedro --extra fmp --extra dukascopy
       - name: Install gitleaks (pinned, checksum verified)
         run: |
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -113,16 +106,14 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: true
           cache-dependency-glob: |
-            pyproject.toml
-            types/pyproject.toml
-            .github/ci-requirements.txt
+            uv.lock
       - name: Install the module, its extras and the CI tools
         run: |
-          uv venv "$RUNNER_TEMP/venv" --python "${{ matrix.python }}"
+          echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --no-sources \
-            -e ./types -e ".[$EXTRAS]" -r .github/ci-requirements.txt
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/venv" uv sync --frozen --python "${{ matrix.python }}" \
+            --group dev --extra testing --extra kedro --extra fmp --extra dukascopy
       - name: Install gitleaks (the planted-secret test runs it)
         run: |
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
